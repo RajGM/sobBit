@@ -59,5 +59,5 @@ function printObject(obj, indent) {
     }
 }
 
-//fetchUserData();
+fetchUserData();
 
