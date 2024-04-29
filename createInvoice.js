@@ -71,57 +71,74 @@ async function createInvoice() {
 
 //createInvoice();
 
-async function createInvoiceOnBehalfOfRecipient(apiKey, recipientWalletId, amount) {
-    const url = 'https://api.blink.sv/graphql';
-    const headers = {
-        'Content-Type': 'application/json',
-        'X-API-KEY': apiKey  // Replace '<YOUR_AUTH_TOKEN_HERE>' with your actual API key
-    };
+async function createInvoiceOnBehalfOfRecipient(apiKey, currency,recipientWalletId, amount) {
+  const url = 'https://api.blink.sv/graphql';
+  const headers = {
+      'Content-Type': 'application/json',
+      'X-API-KEY': apiKey  // Replace '<YOUR_AUTH_TOKEN_HERE>' with your actual API key
+  };
 
-    const query = `
-        mutation LnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
-          lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
-            invoice {
-              paymentRequest
-              paymentHash
-              paymentSecret
-              satoshis
-            }
-            errors {
-              message
-            }
+  const query1 = `
+      mutation LnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+        lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
+          invoice {
+            paymentRequest
+            paymentHash
+            paymentSecret
+            satoshis
+          }
+          errors {
+            message
           }
         }
-    `;
+      }
+  `;
 
-    const variables = {
-        input: {
-            amount: amount,  // The amount for the invoice, as a string
-            recipientWalletId: recipientWalletId  // The recipient's wallet ID
-        }
-    };
-
-    const graphqlData = {
-        query: query,
-        variables: variables
-    };
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(graphqlData)
-        });
-
-        const responseData = await response.json();
-        if (!response.ok) {
-            throw new Error(`HTTP error, status = ${response.status}, message = ${JSON.stringify(responseData)}`);
-        }
-
-        console.log('Invoice Creation Result:', responseData.data.lnInvoiceCreateOnBehalfOfRecipient);
-    } catch (error) {
-        console.error('Error creating invoice:', error);
+  const query2 = `mutation LnUsdInvoiceCreateOnBehalfOfRecipient($input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!) {
+    lnUsdInvoiceCreateOnBehalfOfRecipient(input: $input) {
+      invoice {
+        paymentRequest
+        paymentHash
+        paymentSecret
+        satoshis
+      }
+      errors {
+        message
+      }
     }
+  }
+  `;
+
+  const query = currency === 'BTC' ? query1 : query2;
+
+  const variables = {
+      input: {
+          amount: amount,  // The amount for the invoice, as a string
+          recipientWalletId: recipientWalletId  // The recipient's wallet ID
+      }
+  };
+
+  const graphqlData = {
+      query: query,
+      variables: variables
+  };
+
+  try {
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(graphqlData)
+      });
+
+      const responseData = await response.json();
+      if (!response.ok) {
+          throw new Error(`HTTP error, status = ${response.status}, message = ${JSON.stringify(responseData)}`);
+      }
+
+      console.log('Invoice Creation Result:', responseData.data);
+  } catch (error) {
+      console.error('Error creating invoice:', error);
+  }
 }
 
 //rajgmdevelop19@gmail.com account
@@ -131,4 +148,5 @@ const usdWalletID2 = "49a04a7a-472e-4a5a-a58f-c4aef48818b0";
 const btcWallerID2 = "ca2fc4ab-4ab0-4aa2-b5ac-81530decba1a";
 
 // Example call to the function
-createInvoiceOnBehalfOfRecipient(apiKey2, btcWallerID2, '1');
+createInvoiceOnBehalfOfRecipient(apiKey2, "USD" ,usdWalletID2, '1');
+

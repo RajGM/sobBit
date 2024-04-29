@@ -21,6 +21,7 @@ async function fetchUserData() {
             me {
                 defaultAccount {
                     wallets {
+                        id
                         walletCurrency
                         balance
                     }
