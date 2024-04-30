@@ -291,14 +291,37 @@ bot.on('message', async (msg) => {
 
 // Event handler for inline keyboard button clicks
 bot.on('callback_query', async (callbackQuery) => {
-  const chatId = callbackQuery.message.chat.id;
+  console.log("Inside CallBACK query")
+  console.log("Callback Query:", callbackQuery.message)
+
+  //const chatId =  callbackQuery.inline_message_id?callbackQuery.inline_message_id : callbackQuery.message.chat.id;
   const data = callbackQuery.data;
   const action = data.split('_')[0];  // Get the action part
   const invoiceUID = data.split('_')[1];  // Get the UID part, present in all cases now
 
   console.log("InvoiceID: ", invoiceUID)
-          
-  switch (action) {
+
+  if(callbackQuery.inline_message_id){
+
+    switch (action) {
+      case 'PAY':
+      case 'CANCEL':
+      case 'CHECK':
+        // Update the inline message to reflect the new state
+        bot.editMessageText(`Action ${action} for invoice ${invoiceUID} processed`, {
+          inline_message_id: callbackQuery.inline_message_id
+        });
+        break;
+      default:
+        console.log('Unknown inline action');
+        break;
+    }
+
+  }else if(callbackQuery.message && callbackQuery.message.chat.id){ 
+
+    const chatId = callbackQuery.message.chat.id;
+
+    switch (action) {
       case 'PAY':
           // Handle payment
           //processPayment(chatId, invoiceUID);
@@ -320,11 +343,18 @@ bot.on('callback_query', async (callbackQuery) => {
           //check work in both ways
           bot.sendMessage(chatId, 'Payment Cancelled for invoice: ' + invoiceUID);
           break;
+      case 'CONFIRM':
+        console.log("Processing payment for UUID:", invoiceUID);
+    // Implement payment processing logic here
+    bot.sendMessage(chatId, `Payment processed for ${invoiceUID}`);
       default:
           // Handle unknown button click
           bot.sendMessage(chatId, 'Unknown option clicked, please try again.');
           break;
   }
+
+  }
+
 });
 
 function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType ) {
@@ -520,6 +550,7 @@ bot.onText(/\/lol/, (msg) => {
 });
 
 bot.on('inline_query', (query) => {
+  console.log("Inline QUERY")
   const queryText = query.query.trim();
   const results = [];
 
@@ -537,8 +568,7 @@ bot.on('inline_query', (query) => {
         },
         reply_markup: {
           inline_keyboard: [[
-            { text: "Confirm Payment", callback_data: `PAY_${invoiceUID}` },
-            { text: "Cancel Payment", callback_data: `CANCEL_${invoiceUID}` }
+            { text: "Confirm", callback_data: `PAY_${uuid}` }
           ]]
         }
       });
