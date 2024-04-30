@@ -1,16 +1,12 @@
 require('dotenv').config()
 
 const botKey = process.env.BOTKEY;
-const { Client, Pool } = require('pg');
+const { Client} = require('pg');
 
-//require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
 
 const TELEGRAM_TOKEN = botKey;  // Store your token in .env file
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
-
-const BLINK_API_URL = 'https://dev.blink.sv/api';
 
 const initialMessage = "Welcome! This bot can send and receive sats via Blink. Here are the available commands:\n\n" + 
 "/start or /help - Show all available commands \n\n" + 
@@ -117,10 +113,10 @@ bot.onText(/\/balance/, async (msg) => {
           // Construct message content based on the balanceArray
           let message = "Your balances:\n";
           if (balanceArray.BTC !== undefined) {
-              message += `BTC: ${balanceArray.BTC} sats\n`;
+              message += `BTC Wallet: ${balanceArray.BTC} sats\n`;
           }
           if (balanceArray.USD !== undefined) {
-              message += `USD: ${balanceArray.USD}\n`;
+              message += `USD Wallet: ${balanceArray.USD} cents\n`;
           }
 
           // Send balance message to user
@@ -165,8 +161,11 @@ bot.onText(/\/createInvoice/, async (msg) => {
 
 });
 
+//complete this function similar to how it's done in callBackQuery pay uuid
 // onText pay invoiceID
 bot.onText(/\/pay (\S+)/, async (msg, match) => {
+  //complete this function similar to how it's done in callBackQuery pay uuid 
+  //fetch the details then proceed with payment
   const chatId = msg.chat.id;
   const userId = msg.from.id; // Telegram user ID
   const uuid = match[1]; // The UUID extracted from the command
@@ -205,8 +204,6 @@ bot.onText(/\/pay (\S+)/, async (msg, match) => {
 
 bot.on('message', async (msg) => {
 
-  console.log("Message received:", msg.text)
-
   const chatId = msg.chat.id;
   const state = await client.get(`chat:${chatId}:state`);
   const userId = msg.from.id;
@@ -215,11 +212,8 @@ bot.on('message', async (msg) => {
       const apiKey = msg.text;
       const userId = msg.from.id; // Telegram user ID
 
-      console.log("API key received:", apiKey);
-
       try {
         // Fetch user data from the GraphQL API
-        console.log("Fetching user data...")
         const userData = await fetchUserData(apiKey);
 
         printObject(userData, "");
@@ -242,9 +236,6 @@ bot.on('message', async (msg) => {
         // Add condition to update only if the telegram_id matches
         params.push(userId);
         updateQuery += ` WHERE telegram_id = $${params.length}`;
-
-        console.log("Update query:", updateQuery);
-        console.log("Params:", params);
 
         //Execute the single database query
         await dbClient.query(updateQuery, params);
@@ -394,15 +385,6 @@ bot.on('callback_query', async (callbackQuery) => {
 
 });
 
-function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType) {
-  const currencyType = walletType == "BTC" ? "Sats" : "Cents";
-  const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n*Use this code for payment:* \`${invoiceUID}\``;
-  
-  bot.sendMessage(chatId, detailsMessage, {
-      parse_mode: 'Markdown'
-  });
-}
-
 bot.on('inline_query', async (query) => {
   console.log("Inline QUERY");
   const queryText = query.query.trim().toLowerCase();
@@ -433,8 +415,7 @@ bot.on('inline_query', async (query) => {
       // Handle the case where UUID might be missing or incorrectly formatted
       console.error("No UUID found after 'pay' keyword.");
     }
-  } else 
-  if (queryText.startsWith("generateinvoice")) {
+  } else if (queryText.startsWith("generateinvoice")) {
     const args = queryText.split(" ");
     if (args.length >= 3) {
       const walletType = args[1].toUpperCase();
@@ -643,18 +624,6 @@ async function createInvoiceOnBehalfOfRecipient(apiKey, currency, recipientWalle
     }
 }
 
- // const opts = {
-  //     parse_mode: 'Markdown',
-  //     reply_markup: {
-  //       inline_keyboard: [
-  //         [{ text: 'Pay', callback_data: `PAY_${invoiceUID}` }],
-  //         [{ text: 'Cancel', callback_data: `CANCEL_${invoiceUID}` }],
-  //         [{ text: 'Check Status', callback_data: `CHECK_${invoiceUID}` }]
-  //     ]
-  //     }
-  // };
-
-
 async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
     const url = 'https://api.blink.sv/graphql';
     const headers = {
@@ -703,6 +672,15 @@ async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
     } catch (error) {
         console.error('Error sending payment:', error);
     }
+}
+
+function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType) {
+  const currencyType = walletType == "BTC" ? "Sats" : "Cents";
+  const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n*Use this code for payment:* \`${invoiceUID}\``;
+  
+  bot.sendMessage(chatId, detailsMessage, {
+      parse_mode: 'Markdown'
+  });
 }
 
 function findPaymentRequest(obj) {
