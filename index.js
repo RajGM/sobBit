@@ -12,6 +12,13 @@ const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
 const BLINK_API_URL = 'https://dev.blink.sv/api';
 
+const initialMessage = "Welcome! This bot can send and receive sats via Blink. Here are the available commands:\n\n" + 
+"/start or /help - Show all available commands \n\n" + 
+"/addAPI - Adds a new API_Key for your Blink account or replaces it if it already exists\n" +
+"/balance - Shows the balances in your Blink wallet\n" +
+"/createInvoice - Creates an invoice for USD or sats\n" + 
+"/pay uuid - Pay the invoice using the invoiceID";
+
 // PostgreSQL connection setup
 const dbClient = new Client({
   user: 'postgres', // default superuser
@@ -31,40 +38,17 @@ client.connect();
 
 const { v4: uuidv4 } = require('uuid');
 
-// Define the options for the inline keyboard
-const options = {
-  reply_markup: JSON.stringify({
-      inline_keyboard: [
-          [
-              { text: 'Pay', callback_data: 'Pay' },
-              { text: 'Cancel', callback_data: 'Cancel' }
-          ],
-          [
-              { text: 'CheckStatus', callback_data: 'CheckStatus' }
-          ]
-      ]
-  })
-};
-
 bot.onText(/\/start/, async (msg) => {
 
   const chatId = msg.chat.id;
-  const helpMessage = "Welcome! This bot can send and receive sats via Blink. Here are the available commands:\n\n" + 
-  "/start or /help - Show all available commands \n\n" + 
-  "/addAPI - Adds a new API_Key for your Blink account or replaces it if it already exists\n" +
-  "/balance - Shows the balances in your Blink wallet\n" +
-  "/createInvoice - Creates an invoice for USD or sats";
+  const helpMessage = initialMessage;
   bot.sendMessage(chatId, helpMessage);
 
 });
 
 bot.onText(/\/help/, (msg) => {
   const chatId = msg.chat.id;
-  const helpMessage = "Welcome! This bot can send and receive sats via Blink. Here are the available commands:\n\n" + 
-  "/start or /help - Show all available commands \n\n" + 
-  "/addAPI - Adds a new API_Key for your Blink account or replaces it if it already exists\n" +
-  "/balance - Shows the balances in your Blink wallet\n" +
-  "/createInvoice - Creates an invoice for USD or sats";
+  const helpMessage = initialMessage;
   bot.sendMessage(chatId, helpMessage);
 
 });
@@ -181,6 +165,44 @@ bot.onText(/\/createInvoice/, async (msg) => {
 
 });
 
+// onText pay invoiceID
+bot.onText(/\/pay (\S+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id; // Telegram user ID
+  const uuid = match[1]; // The UUID extracted from the command
+
+  bot.sendMessage(chatId, `Processing payment for invoice: ${uuid}`);
+
+  /*
+  try {
+      // Check if the user exists in the database
+      const userResult = await dbClient.query(
+          'SELECT api_key FROM users WHERE telegram_id = $1',
+          [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+          // No user found with that Telegram ID
+          bot.sendMessage(chatId, "Your account is not registered or API key is missing. Please register and set up your API key with /setup.");
+      } else {
+          const apiKey = userResult.rows[0].api_key;
+
+          // Assuming `processPayment` is a function that handles the payment logic
+          const paymentResult = await processPayment(apiKey, uuid);
+          if (paymentResult.success) {
+              bot.sendMessage(chatId, `Payment successful! Transaction ID: ${paymentResult.transactionId}`);
+          } else {
+              bot.sendMessage(chatId, `Payment failed: ${paymentResult.message}`);
+          }
+      }
+  } catch (err) {
+      console.error('Error processing payment:', err);
+      bot.sendMessage(chatId, "There was an error processing your payment. Please try again later.");
+  }
+*/
+
+});
+
 bot.on('message', async (msg) => {
 
   console.log("Message received:", msg.text)
@@ -277,11 +299,7 @@ bot.on('message', async (msg) => {
         const query = 'INSERT INTO invoices (invoice_data, invoice_uuid) VALUES ($1, $2)';
         await dbClient.query(query, [invoiceJSON, UUID]);
 
-        if(walletType === 'BTC') {
-          sendInvoiceDetailsToUser(chatId, UUID, amount, walletType);
-        }else{
-          sendInvoiceDetailsToUser(chatId, UUID, amount);
-        }
+        sendInvoiceDetailsToUser(chatId, UUID, amount, walletType);
        
     } catch (error) {
         console.error("Error during invoice creation process:", error);
@@ -307,8 +325,6 @@ bot.on('callback_query', async (callbackQuery) => {
 
     switch (action) {
       case 'PAY':
-      case 'CANCEL':
-      case 'CHECK':
         // Update the inline message to reflect the new state
         bot.editMessageText(`Action ${action} for invoice ${invoiceUID} processed`, {
           inline_message_id: callbackQuery.inline_message_id
@@ -359,22 +375,90 @@ bot.on('callback_query', async (callbackQuery) => {
 
 });
 
-function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType ) {
-
-  const detailsMessage = `Pay the invoice \nPayment Request: XYZ USER \n Amount: ${amount} ${walletType == "BTC" ? "Sats" : "USD" }`;
-  const opts = {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: 'Pay', callback_data: `PAY_${invoiceUID}` }],
-          [{ text: 'Cancel', callback_data: `CANCEL_${invoiceUID}` }],
-          [{ text: 'Check Status', callback_data: `CHECK_${invoiceUID}` }]
-      ]
-      }
-  };
-
-  bot.sendMessage(chatId, detailsMessage, opts);
+function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType) {
+  const currencyType = walletType == "BTC" ? "Sats" : "Cents";
+  const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n*Use this code for payment:* \`${invoiceUID}\``;
+  
+  bot.sendMessage(chatId, detailsMessage, {
+      parse_mode: 'Markdown'
+  });
 }
+
+bot.on('inline_query', (query) => {
+  console.log("Inline QUERY");
+  const queryText = query.query.trim().toLowerCase();
+  console.log("QUERY TEXT:", queryText);
+  const results = [];
+
+  if (queryText.startsWith("pay")) {
+    const uuid = queryText.split(" ")[1];  // Assuming the format is "pay UUID"
+    if (uuid) {
+      // Create an article result with payment details
+      results.push({
+        type: 'article',
+        id: uuid,
+        title: 'Confirm Payment',
+        input_message_content: {
+          message_text: `🔹 **Confirm Your Payment**\n\n*Invoice ID:* \`${uuid}\`\n\n`,
+          parse_mode: 'Markdown'
+        },
+        reply_markup: {
+          inline_keyboard: [[
+              { text: "Pay Now", callback_data: `PAY_${uuid}` }
+          ]]
+      },
+        description: `Tap to send and confirm payment for Invoice ID ${uuid}`  // Adding a description for clarity
+      });
+    } else {
+      // Handle the case where UUID might be missing or incorrectly formatted
+      console.error("No UUID found after 'pay' keyword.");
+    }
+  } else 
+  if (queryText.startsWith("generateinvoice")) {
+    const args = queryText.split(" ");
+    if (args.length >= 3) {
+      const walletType = args[1];
+      const amount = args[2];
+      // Assuming checkApiKey function to check if the user has an API key associated
+      if ( true /*checkApiKey(query.from.id)*/) {
+        //const invoiceData = generateInvoice(walletType, amount);
+        const invoiceData = {uuid:"1234"};
+        results.push({
+          type: 'article',
+          id: invoiceData.uuid, // Assume generateInvoice returns an object with a uuid
+          title: 'Invoice Generated',
+          input_message_content: {
+            message_text: `🔹 **Invoice Generated**\n\n*Invoice ID:* \`${invoiceData.uuid}\`\n*Amount:* \`${amount} ${walletType}\`\n\nPlease confirm to proceed with the payment.`,
+            parse_mode: 'Markdown'
+          },
+          reply_markup: {
+            inline_keyboard: [[
+                { text: "Pay Now", callback_data: `PAY_${invoiceData.uuid}` }
+            ]]
+        },
+          description: `Invoice for ${amount} ${walletType} ready. Tap to confirm and send.`
+        });
+      } else {
+        results.push({
+          type: 'article',
+          id: 'no-api-key',
+          title: 'No API Key Found',
+          input_message_content: {
+            message_text: `🚫 **No API Key Found**\n\nPlease configure your API key to generate invoices.`,
+            parse_mode: 'Markdown'
+          },
+          description: `No API Key found. Please add your API key to generate invoices.`
+        });
+      }
+    }
+  } else {
+    console.log("Query does not match expected commands.");
+  }
+
+  bot.answerInlineQuery(query.id, results).catch(error => {
+    console.error("Failed to answer inline query:", error);
+  });
+});
 
 async function fetchUserData(blinkKey) {
   const url = 'https://api.blink.sv/graphql';
@@ -515,32 +599,13 @@ async function createInvoiceOnBehalfOfRecipient(apiKey, currency, recipientWalle
     }
 }
 
-bot.on('inline_query', (query) => {
-  console.log("Inline QUERY")
-  const queryText = query.query.trim();
-  console.log("QUERY TEXT:",queryText)
-  const results = [];
-
-  if (queryText.startsWith("pay")) {
-    const uuid = queryText.split(" ")[1];  // Assuming the format is "pay UUID"
-    if (uuid) {
-      // Create an article result with payment details
-      results.push({
-        type: 'article',
-        id: uuid,
-        title: 'PAY',
-        input_message_content: {
-          message_text: `Confirm your payment for ${uuid}: \n\`MONOTOUCH\``,
-          parse_mode: 'Markdown'
-        },
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "Confirm", callback_data: `PAY_${uuid}` }
-          ]]
-        }
-      });
-    }
-  }
-
-  bot.answerInlineQuery(query.id, results);
-});
+ // const opts = {
+  //     parse_mode: 'Markdown',
+  //     reply_markup: {
+  //       inline_keyboard: [
+  //         [{ text: 'Pay', callback_data: `PAY_${invoiceUID}` }],
+  //         [{ text: 'Cancel', callback_data: `CANCEL_${invoiceUID}` }],
+  //         [{ text: 'Check Status', callback_data: `CHECK_${invoiceUID}` }]
+  //     ]
+  //     }
+  // };
