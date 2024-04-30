@@ -1,4 +1,6 @@
-const botKey = "6320301632:AAE43srePE7IXcS164kNli-8sSQmX9A9Qvg";
+require('dotenv').config()
+
+const botKey = process.env.BOTKEY;
 const { Client, Pool } = require('pg');
 
 //require('dotenv').config();
@@ -150,7 +152,7 @@ bot.onText(/\/balance/, async (msg) => {
   }
 });
 
-bot.onText(/\/createInvoice/, async (msg) => {
+bot.onText(/\/createInvoice/, async (msg) => { 
 
   const chatId = msg.chat.id;
   const userId = msg.from.id; // Telegram user ID
@@ -513,45 +515,10 @@ async function createInvoiceOnBehalfOfRecipient(apiKey, currency, recipientWalle
     }
 }
 
-bot.onText(/\/test/, (msg) => {
-  const chatId = msg.chat.id;
-  const invoiceOptions = {
-      chat_id: chatId,
-      title: 'Test Purchase',
-      description: 'Example Description Here',
-      payload: 'UUID', // This is a unique payload to identify the payment
-      provider_token: botKey, // Replace with your payment provider token
-      currency: 'USD',
-      prices: [
-          { label: 'Test Item', amount: 10000 } // price in the smallest units (cents)
-      ],
-      provider_data: JSON.stringify({
-          // Provider-specific data
-          send_phone_number_to_provider: false,
-          send_email_to_provider: false
-      }),
-      reply_markup: JSON.stringify({
-          inline_keyboard: [[{text: "Pay", pay: true}]]
-      })
-  };
-
-  bot.sendInvoice(invoiceOptions);
-});
-
-bot.onText(/\/lol/, (msg) => {
-  const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Please complete your payment by visiting the following link:", {
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "Pay Now", url: 'www.google.com' }
-      ]]
-    }
-  });
-});
-
 bot.on('inline_query', (query) => {
   console.log("Inline QUERY")
   const queryText = query.query.trim();
+  console.log("QUERY TEXT:",queryText)
   const results = [];
 
   if (queryText.startsWith("pay")) {
@@ -563,7 +530,7 @@ bot.on('inline_query', (query) => {
         id: uuid,
         title: 'PAY',
         input_message_content: {
-          message_text: `Confirm your payment for ${uuid}:`,
+          message_text: `Confirm your payment for ${uuid}: \n\`MONOTOUCH\``,
           parse_mode: 'Markdown'
         },
         reply_markup: {
@@ -577,15 +544,3 @@ bot.on('inline_query', (query) => {
 
   bot.answerInlineQuery(query.id, results);
 });
-
-// bot.on('inline_query', (query) => {
-//   const results = [{
-//       type: 'article',
-//       id: '1', // Unique identifier for this result
-//       title: 'Pay',
-//       input_message_content: {
-//           message_text: `Paying with UUID: ${query.query}`
-//       }
-//   }];
-//   bot.answerInlineQuery(query.id, results).catch(console.error);
-// });
