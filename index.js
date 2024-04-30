@@ -27,6 +27,8 @@ const client = redis.createClient({
 });
 client.connect();
 
+const { v4: uuidv4 } = require('uuid');
+
 // Define the options for the inline keyboard
 const options = {
   reply_markup: JSON.stringify({
@@ -164,7 +166,7 @@ bot.onText(/\/createInvoice/, async (msg) => {
 
       if (!userExists) {
           // If the user does not exist, insert a new record
-          bot.sendMessage(chatId, "Welcome! Blink API Key doesn't exists, Please add one Checkout /help.");
+          bot.sendMessage(chatId, "Welcome! Blink API Key doesn't exists, Please add one Check /help.");
       } else {
 
         await client.setEx(`chat:${chatId}:state`, 180, 'wallet_amount'); // Expires after 3 minutes
@@ -235,44 +237,88 @@ bot.on('message', async (msg) => {
   }
 
   if(state === 'wallet_amount') {
-    //create and send the invoice pack
-    const validFormat = /^(BTC|USD)\s+\d+$/.test(msg.text);
+    // Create and send the invoice pack
+    console.log("Message Txt:", msg.text)
 
-    if(!validFormat){
-      bot.sendMessage(chatId, "Invalid input format. Please start invoice generation again with /createInvoice.");
-    }else{
-      const [walletType, amount] = msg.text.match(/^(BTC|USD)\s+(\d+)$/);
+    const validFormat = msg.text.trim().match(/^(\S+)\s+(\d+)$/i);
 
-      const dbResult = await dbClient.query(
-        'SELECT * FROM users WHERE telegram_id = $1',
-        [userId]
-    );
+    console.log("Valid format:", validFormat);
 
-    console.log("dbResult:",dbResult)
-        
+    if(!validFormat) {
+        bot.sendMessage(chatId, "Invalid input format. Please start invoice generation again with /createInvoice.");
+        return; // Exit the function to prevent further execution
     }
 
+    try {
+        const walletType = validFormat[1];
+        const amountStr = validFormat[2];
+        const amount = parseInt(amountStr, 10);  // Convert string to integer
 
-    bot.sendMessage(chatId, "Request xyz for :", options);
-  }
+        const dbResult = await dbClient.query(
+            'SELECT * FROM users WHERE telegram_id = $1',
+            [userId]
+        );
+
+        if (dbResult.rows.length === 0) {
+            throw new Error("User not found.");
+        }
+
+        // Determine the correct wallet ID based on the wallet type
+        const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
+
+        // Fetch the API key and attempt to create an invoice
+        const apiKey = dbResult.rows[0].api_keys;
+        const getInvoice = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
+        const invoiceJSON = JSON.stringify(getInvoice)
+
+        const UUID = uuidv4();
+        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid) VALUES ($1, $2)';
+        await dbClient.query(query, [invoiceJSON, UUID]);
+
+        if(walletType === 'BTC') {
+          sendInvoiceDetailsToUser(chatId, UUID, amount, walletType);
+        }else{
+          sendInvoiceDetailsToUser(chatId, UUID, amount);
+        }
+       
+    } catch (error) {
+        console.error("Error during invoice creation process:", error);
+        bot.sendMessage(chatId, `Failed to create invoice due to an ${error}. Please try again.`);
+    }
+}
 
 });
 
 // Event handler for inline keyboard button clicks
-bot.on('callback_query', (callbackQuery) => {
+bot.on('callback_query', async (callbackQuery) => {
   const chatId = callbackQuery.message.chat.id;
   const data = callbackQuery.data;
+  const action = data.split('_')[0];  // Get the action part
+  const invoiceUID = data.split('_')[1];  // Get the UID part, present in all cases now
 
-  // Handle different button clicks
-  switch (data) {
-      case 'Pay':
-          bot.sendMessage(chatId, 'You paid successfully');
+  console.log("InvoiceID: ", invoiceUID)
+          
+  switch (action) {
+      case 'PAY':
+          // Handle payment
+          //processPayment(chatId, invoiceUID);
+          //put userID here, if generated one == userID then don't process
+          // else process
+          //check is userID has the api keys
+          //if yes then process
+          //else send message to add api keys
+          bot.sendMessage(chatId, 'Payment Done for invoice: ' + invoiceUID);
           break;
-      case 'Cancel':
-          bot.sendMessage(chatId, 'Payment Cancelled');
+      case 'CANCEL':
+          // Handle cancellation
+          //cancel work in both ways
+          bot.sendMessage(chatId, 'Payment Cancelled for invoice: ' + invoiceUID);
           break;
-      case 'CheckStatus':
-          bot.sendMessage(chatId, 'Showing current payment Status');
+      case 'CHECK':
+          // Handle status check
+          //checkInvoiceStatus(chatId, invoiceUID);
+          //check work in both ways
+          bot.sendMessage(chatId, 'Payment Cancelled for invoice: ' + invoiceUID);
           break;
       default:
           // Handle unknown button click
@@ -280,6 +326,23 @@ bot.on('callback_query', (callbackQuery) => {
           break;
   }
 });
+
+function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType ) {
+
+  const detailsMessage = `Pay the invoice \nPayment Request: XYZ USER \n Amount: ${amount} ${walletType == "BTC" ? "Sats" : "USD" }`;
+  const opts = {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Pay', callback_data: `PAY_${invoiceUID}` }],
+          [{ text: 'Cancel', callback_data: `CANCEL_${invoiceUID}` }],
+          [{ text: 'Check Status', callback_data: `CHECK_${invoiceUID}` }]
+      ]
+      }
+  };
+
+  bot.sendMessage(chatId, detailsMessage, opts);
+}
 
 async function fetchUserData(blinkKey) {
   const url = 'https://api.blink.sv/graphql';
@@ -331,72 +394,168 @@ function printObject(obj, indent) {
   }
 }
 
-async function createInvoiceOnBehalfOfRecipient(apiKey, currency,recipientWalletId, amount) {
-  const url = 'https://api.blink.sv/graphql';
-  const headers = {
-      'Content-Type': 'application/json',
-      'X-API-KEY': apiKey
+async function createInvoiceOnBehalfOfRecipient(apiKey, currency, recipientWalletId, amount) {
+    const url = 'https://api.blink.sv/graphql';
+    const headers = {
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiKey
+    };
+
+    // Define the GraphQL queries for BTC and USD invoices
+    const queryBTC = `
+        mutation LnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+            lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
+                invoice {
+                    paymentRequest
+                    paymentHash
+                    paymentSecret
+                    satoshis
+                }
+                errors {
+                    message
+                }
+            }
+        }
+    `;
+
+    const queryUSD = `
+        mutation LnUsdInvoiceCreateOnBehalfOfRecipient($input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!) {
+            lnUsdInvoiceCreateOnBehalfOfRecipient(input: $input) {
+                invoice {
+                    paymentRequest
+                    paymentHash
+                    paymentSecret
+                    satoshis
+                }
+                errors {
+                    message
+                }
+            }
+        }
+    `;
+
+    // Choose the correct query based on the currency
+    
+    const query = currency === 'BTC' ? queryBTC : queryUSD;
+
+    const variables = {
+        input: {
+            amount: amount,  // The amount for the invoice
+            recipientWalletId: recipientWalletId  // The recipient's wallet ID
+        }
+    };
+
+    const graphqlData = {
+        query: query,
+        variables: variables
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(graphqlData)
+        });
+
+        const responseData = await response.json();
+        if (!response.ok) {
+            throw new Error(`HTTP error, status = ${response.status}, details = ${JSON.stringify(responseData)}`);
+        }
+
+        // Check for GraphQL errors and handle them
+        if (responseData.errors && responseData.errors.length > 0) {
+            throw new Error(`GraphQL error: ${responseData.errors.map(err => err.message).join(', ')}`);
+        }
+
+        if (responseData.data && responseData.data.lnInvoiceCreateOnBehalfOfRecipient && responseData.data.lnInvoiceCreateOnBehalfOfRecipient.errors.length > 0) {
+            throw new Error(`Invoice creation error: ${responseData.data.lnInvoiceCreateOnBehalfOfRecipient.errors.map(err => err.message).join(', ')}`);
+        }
+
+        if (responseData.data && responseData.data.LnUsdInvoiceCreateOnBehalfOfRecipient && responseData.data.LnUsdInvoiceCreateOnBehalfOfRecipient.errors.length > 0) {
+          throw new Error(`Invoice creation error: ${responseData.data.LnUsdInvoiceCreateOnBehalfOfRecipient.errors.map(err => err.message).join(', ')}`);
+        }
+
+        console.log('Invoice Creation Result:', responseData.data);
+        return responseData.data; // Return the data for further processing or confirmation
+    } catch (error) {
+        console.error('Error creating invoice:', error.message);
+        throw error; // Rethrow the error after logging
+    }
+}
+
+bot.onText(/\/test/, (msg) => {
+  const chatId = msg.chat.id;
+  const invoiceOptions = {
+      chat_id: chatId,
+      title: 'Test Purchase',
+      description: 'Example Description Here',
+      payload: 'UUID', // This is a unique payload to identify the payment
+      provider_token: botKey, // Replace with your payment provider token
+      currency: 'USD',
+      prices: [
+          { label: 'Test Item', amount: 10000 } // price in the smallest units (cents)
+      ],
+      provider_data: JSON.stringify({
+          // Provider-specific data
+          send_phone_number_to_provider: false,
+          send_email_to_provider: false
+      }),
+      reply_markup: JSON.stringify({
+          inline_keyboard: [[{text: "Pay", pay: true}]]
+      })
   };
 
-  const query1 = `
-      mutation LnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
-        lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
-          invoice {
-            paymentRequest
-            paymentHash
-            paymentSecret
-            satoshis
-          }
-          errors {
-            message
-          }
-        }
-      }
-  `;
+  bot.sendInvoice(invoiceOptions);
+});
 
-  const query2 = `mutation LnUsdInvoiceCreateOnBehalfOfRecipient($input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!) {
-    lnUsdInvoiceCreateOnBehalfOfRecipient(input: $input) {
-      invoice {
-        paymentRequest
-        paymentHash
-        paymentSecret
-        satoshis
-      }
-      errors {
-        message
-      }
+bot.onText(/\/lol/, (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, "Please complete your payment by visiting the following link:", {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "Pay Now", url: 'www.google.com' }
+      ]]
+    }
+  });
+});
+
+bot.on('inline_query', (query) => {
+  const queryText = query.query.trim();
+  const results = [];
+
+  if (queryText.startsWith("pay")) {
+    const uuid = queryText.split(" ")[1];  // Assuming the format is "pay UUID"
+    if (uuid) {
+      // Create an article result with payment details
+      results.push({
+        type: 'article',
+        id: uuid,
+        title: 'PAY',
+        input_message_content: {
+          message_text: `Confirm your payment for ${uuid}:`,
+          parse_mode: 'Markdown'
+        },
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "Confirm Payment", callback_data: `PAY_${invoiceUID}` },
+            { text: "Cancel Payment", callback_data: `CANCEL_${invoiceUID}` }
+          ]]
+        }
+      });
     }
   }
-  `;
 
-  const query = currency === 'BTC' ? query1 : query2;
+  bot.answerInlineQuery(query.id, results);
+});
 
-  const variables = {
-      input: {
-          amount: amount,  // The amount for the invoice, as a string
-          recipientWalletId: recipientWalletId
-      }
-  };
-
-  const graphqlData = {
-      query: query,
-      variables: variables
-  };
-
-  try {
-      const response = await fetch(url, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(graphqlData)
-      });
-
-      const responseData = await response.json();
-      if (!response.ok) {
-          throw new Error(`HTTP error, status = ${response.status}, message = ${JSON.stringify(responseData)}`);
-      }
-
-      console.log('Invoice Creation Result:', responseData.data);
-  } catch (error) {
-      console.error('Error creating invoice:', error);
-  }
-}
+// bot.on('inline_query', (query) => {
+//   const results = [{
+//       type: 'article',
+//       id: '1', // Unique identifier for this result
+//       title: 'Pay',
+//       input_message_content: {
+//           message_text: `Paying with UUID: ${query.query}`
+//       }
+//   }];
+//   bot.answerInlineQuery(query.id, results).catch(console.error);
+// });
