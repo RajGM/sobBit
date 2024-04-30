@@ -296,8 +296,8 @@ bot.on('message', async (msg) => {
         const invoiceJSON = JSON.stringify(getInvoice)
 
         const UUID = uuidv4();
-        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid) VALUES ($1, $2)';
-        await dbClient.query(query, [invoiceJSON, UUID]);
+        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
+        await dbClient.query(query, [invoiceJSON, UUID, walletType]);
 
         sendInvoiceDetailsToUser(chatId, UUID, amount, walletType);
        
@@ -312,8 +312,7 @@ bot.on('message', async (msg) => {
 // Event handler for inline keyboard button clicks
 bot.on('callback_query', async (callbackQuery) => {
   console.log("Inside CallBACK query")
-  console.log("Callback Query:", callbackQuery.message)
-
+  
   //const chatId =  callbackQuery.inline_message_id?callbackQuery.inline_message_id : callbackQuery.message.chat.id;
   const data = callbackQuery.data;
   const action = data.split('_')[0];  // Get the action part
@@ -326,9 +325,34 @@ bot.on('callback_query', async (callbackQuery) => {
     switch (action) {
       case 'PAY':
         // Update the inline message to reflect the new state
+        //do a look retrive 
+        //process the payment 
+        const userId = callbackQuery.from.id; 
+        const dbResult = await dbClient.query(
+          'SELECT * FROM users WHERE telegram_id = $1',
+          [userId]
+      );
+
+      const userExists = dbResult.rows.length > 0;
+
+      if(userExists){
+        const apiKey = dbResult.rows[0].api_keys;
+        const uidResult = await dbClient.query(
+          'SELECT * FROM invoices WHERE invoice_uuid = $1',
+          [invoiceUID]
+      );
+      const walletType = uidResult.rows[0].wallet_type;
+      const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
+        const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
+        sendInvoicePayment(apiKey, paymentRequest, dwalletId);
+
         bot.editMessageText(`Action ${action} for invoice ${invoiceUID} processed`, {
           inline_message_id: callbackQuery.inline_message_id
         });
+
+      }else{
+        // show to add api keys
+      }
         break;
       default:
         console.log('Unknown inline action');
@@ -342,12 +366,7 @@ bot.on('callback_query', async (callbackQuery) => {
     switch (action) {
       case 'PAY':
           // Handle payment
-          //processPayment(chatId, invoiceUID);
-          //put userID here, if generated one == userID then don't process
-          // else process
-          //check is userID has the api keys
-          //if yes then process
-          //else send message to add api keys
+          // do the same processing here as done in the inline query
           bot.sendMessage(chatId, 'Payment Done for invoice: ' + invoiceUID);
           break;
       case 'CANCEL':
@@ -384,9 +403,10 @@ function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType) {
   });
 }
 
-bot.on('inline_query', (query) => {
+bot.on('inline_query', async (query) => {
   console.log("Inline QUERY");
   const queryText = query.query.trim().toLowerCase();
+  const userId = query.from.id;  
   console.log("QUERY TEXT:", queryText);
   const results = [];
 
@@ -417,27 +437,51 @@ bot.on('inline_query', (query) => {
   if (queryText.startsWith("generateinvoice")) {
     const args = queryText.split(" ");
     if (args.length >= 3) {
-      const walletType = args[1];
-      const amount = args[2];
+      const walletType = args[1].toUpperCase();
+      const amountStr = args[2];
+      const amount = parseInt(amountStr, 10);
+
+      const dbResult = await dbClient.query(
+        'SELECT * FROM users WHERE telegram_id = $1',
+        [userId]
+    );
+
+    console.log("dbResult:",dbResult)
+
+    const userExists = dbResult.rows.length > 0;
       // Assuming checkApiKey function to check if the user has an API key associated
-      if ( true /*checkApiKey(query.from.id)*/) {
-        //const invoiceData = generateInvoice(walletType, amount);
-        const invoiceData = {uuid:"1234"};
-        results.push({
-          type: 'article',
-          id: invoiceData.uuid, // Assume generateInvoice returns an object with a uuid
-          title: 'Invoice Generated',
-          input_message_content: {
-            message_text: `🔹 **Invoice Generated**\n\n*Invoice ID:* \`${invoiceData.uuid}\`\n*Amount:* \`${amount} ${walletType}\`\n\nPlease confirm to proceed with the payment.`,
-            parse_mode: 'Markdown'
+      if (userExists) {
+        console.log(dbResult.rows[0])
+        // Fetch the API key and attempt to create an invoice
+        const apiKey = dbResult.rows[0].api_keys;
+        const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
+        console.log("API Key:", apiKey, "walletType:", walletType ,"Wallet ID:", walletId, "Amount:", amount)
+        const getInvoice = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
+        const invoiceJSON = JSON.stringify(getInvoice)
+
+        const UUID = uuidv4();
+        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
+        const currencyType = walletType == "BTC" ? "Sats" : "Cents";
+        await dbClient.query(query, [invoiceJSON, UUID, walletType]).then(() => {
+
+          results.push({
+            type: 'article',
+            id: UUID, // Assume generateInvoice returns an object with a uuid
+            title: 'Invoice Generated',
+            input_message_content: {
+              message_text: `🔹 **Invoice Generated**\n\n*Invoice ID:* \`${UUID}\`\n*Amount:* \`${amount} ${currencyType}\`\n\nPlease confirm to proceed with the payment.`,
+              parse_mode: 'Markdown'
+            },
+            reply_markup: {
+              inline_keyboard: [[
+                  { text: "Confirm", callback_data: `PAY_${UUID}` }
+              ]]
           },
-          reply_markup: {
-            inline_keyboard: [[
-                { text: "Pay Now", callback_data: `PAY_${invoiceData.uuid}` }
-            ]]
-        },
-          description: `Invoice for ${amount} ${walletType} ready. Tap to confirm and send.`
+            description: `Invoice for ${amount} ${walletType} ready. Tap to confirm and send.`
+          });
+
         });
+      
       } else {
         results.push({
           type: 'article',
@@ -609,3 +653,69 @@ async function createInvoiceOnBehalfOfRecipient(apiKey, currency, recipientWalle
   //     ]
   //     }
   // };
+
+
+async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
+    const url = 'https://api.blink.sv/graphql';
+    const headers = {
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiKey  // Ensure to replace '<YOUR_AUTH_TOKEN_HERE>' with your actual API key
+    };
+
+    const query = `
+        mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
+          lnInvoicePaymentSend(input: $input) {
+            status
+            errors {
+              message
+              path
+              code
+            }
+          }
+        }
+    `;
+
+    const variables = {
+        input: {
+            paymentRequest: paymentRequest,  // The actual payment request string
+            walletId: walletId              // The wallet ID from which the payment should be made
+        }
+    };
+
+    const graphqlData = {
+        query: query,
+        variables: variables
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(graphqlData)
+        });
+
+        const responseData = await response.json();
+        if (!response.ok) {
+            throw new Error(`HTTP error, status = ${response.status}, message = ${JSON.stringify(responseData)}`);
+        }
+
+        console.log('Payment Status:', responseData.data.lnInvoicePaymentSend);
+    } catch (error) {
+        console.error('Error sending payment:', error);
+    }
+}
+
+function findPaymentRequest(obj) {
+
+  // If not, check if the current value is an object and search within it recursively
+  for (const key in obj) {
+      if (obj.hasOwnProperty(key) && typeof obj[key] === 'object') {
+          const result = findPaymentRequest(obj[key]);
+          if (result !== null) {
+              return result;  // Return the found paymentRequest
+          }
+      }
+  }
+
+  return null;  // Return null if no paymentRequest is found
+}
