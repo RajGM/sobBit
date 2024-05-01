@@ -161,16 +161,46 @@ bot.onText(/\/createInvoice/, async (msg) => {
 
 });
 
-//complete this function similar to how it's done in callBackQuery pay uuid
-// onText pay invoiceID
 bot.onText(/\/pay (\S+)/, async (msg, match) => {
-  //complete this function similar to how it's done in callBackQuery pay uuid 
-  //fetch the details then proceed with payment
   const chatId = msg.chat.id;
   const userId = msg.from.id; // Telegram user ID
-  const uuid = match[1]; // The UUID extracted from the command
+  const invoiceUID = match[1]; // The UUID extracted from the command
 
-  bot.sendMessage(chatId, `Processing payment for invoice: ${uuid}`);
+  const dbResult = await dbClient.query(
+     'SELECT * FROM users WHERE telegram_id = $1',
+     [userId]
+ );
+
+ const userExists = dbResult.rows.length > 0;
+
+ if(userExists){
+   const apiKey = dbResult.rows[0].api_keys;
+   const uidResult = await dbClient.query(
+     'SELECT * FROM invoices WHERE invoice_uuid = $1',
+     [invoiceUID]
+ );
+ const walletType = uidResult.rows[0].wallet_type;
+ const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
+   const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
+
+
+   if (paymentRequest !== null) {
+     // Assuming sendInvoicePayment is a function that sends the payment request
+     await sendInvoicePayment(apiKey, paymentRequest, walletId);
+ 
+     // Assuming bot is your Telegram bot instance
+     bot.sendMessage(chatId, 'Payment Done for invoice: ' + invoiceUID);
+     
+ } else {
+     // Handle the case where no payment request is found
+     console.error('No payment request found for invoice:', invoiceUID);
+     await bot.sendMessage(callbackQuery.message.chat.id, 'No payment request found for this invoice.');
+ }
+
+ }else{
+   const chatId = callbackQuery.message.chat.id;
+   bot.sendMessage(chatId, 'No API Key found. Please add your API key to generate invoices.');
+ }
 
   /*
   try {
@@ -300,7 +330,6 @@ bot.on('message', async (msg) => {
 
 });
 
-// Event handler for inline keyboard button clicks
 bot.on('callback_query', async (callbackQuery) => {
   console.log("Inside CallBACK query")
   
@@ -315,11 +344,8 @@ bot.on('callback_query', async (callbackQuery) => {
 
     switch (action) {
       case 'PAY':
-        // Update the inline message to reflect the new state
-        //do a look retrive 
-        //process the payment 
-        const userId = callbackQuery.from.id; 
-        const dbResult = await dbClient.query(
+       const userId = callbackQuery.from.id; 
+       const dbResult = await dbClient.query(
           'SELECT * FROM users WHERE telegram_id = $1',
           [userId]
       );
@@ -335,22 +361,36 @@ bot.on('callback_query', async (callbackQuery) => {
       const walletType = uidResult.rows[0].wallet_type;
       const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
         const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
-        sendInvoicePayment(apiKey, paymentRequest, dwalletId);
 
-        bot.editMessageText(`Action ${action} for invoice ${invoiceUID} processed`, {
-          inline_message_id: callbackQuery.inline_message_id
-        });
+
+        if (paymentRequest !== null) {
+          // Assuming sendInvoicePayment is a function that sends the payment request
+          await sendInvoicePayment(apiKey, paymentRequest, walletId);
+      
+          // Assuming bot is your Telegram bot instance
+          await bot.editMessageText(`Action ${action} for invoice ${invoiceUID} processed`, {
+              inline_message_id: callbackQuery.inline_message_id
+          });
+      } else {
+          // Handle the case where no payment request is found
+          console.error('No payment request found for invoice:', invoiceUID);
+          await bot.sendMessage(callbackQuery.message.chat.id, 'No payment request found for this invoice.');
+      }
 
       }else{
-        // show to add api keys
+        const chatId = callbackQuery.message.chat.id;
+        bot.sendMessage(chatId, 'No API Key found. Please add your API key to generate invoices.');
       }
+
         break;
       default:
         console.log('Unknown inline action');
         break;
     }
 
-  }else if(callbackQuery.message && callbackQuery.message.chat.id){ 
+  } 
+  
+  if(callbackQuery.message && callbackQuery.message.chat.id){ 
 
     const chatId = callbackQuery.message.chat.id;
 
@@ -358,23 +398,44 @@ bot.on('callback_query', async (callbackQuery) => {
       case 'PAY':
           // Handle payment
           // do the same processing here as done in the inline query
+          const userId = callbackQuery.from.id; 
+       const dbResult = await dbClient.query(
+          'SELECT * FROM users WHERE telegram_id = $1',
+          [userId]
+      );
+
+      const userExists = dbResult.rows.length > 0;
+
+      if(userExists){
+        const apiKey = dbResult.rows[0].api_keys;
+        const uidResult = await dbClient.query(
+          'SELECT * FROM invoices WHERE invoice_uuid = $1',
+          [invoiceUID]
+      );
+      const walletType = uidResult.rows[0].wallet_type;
+      const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
+        const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
+
+
+        if (paymentRequest !== null) {
+          // Assuming sendInvoicePayment is a function that sends the payment request
+          await sendInvoicePayment(apiKey, paymentRequest, walletId);
+      
+          // Assuming bot is your Telegram bot instance
           bot.sendMessage(chatId, 'Payment Done for invoice: ' + invoiceUID);
+          
+      } else {
+          // Handle the case where no payment request is found
+          console.error('No payment request found for invoice:', invoiceUID);
+          await bot.sendMessage(callbackQuery.message.chat.id, 'No payment request found for this invoice.');
+      }
+
+      }else{
+        const chatId = callbackQuery.message.chat.id;
+        bot.sendMessage(chatId, 'No API Key found. Please add your API key to generate invoices.');
+      }
+
           break;
-      case 'CANCEL':
-          // Handle cancellation
-          //cancel work in both ways
-          bot.sendMessage(chatId, 'Payment Cancelled for invoice: ' + invoiceUID);
-          break;
-      case 'CHECK':
-          // Handle status check
-          //checkInvoiceStatus(chatId, invoiceUID);
-          //check work in both ways
-          bot.sendMessage(chatId, 'Payment Cancelled for invoice: ' + invoiceUID);
-          break;
-      case 'CONFIRM':
-        console.log("Processing payment for UUID:", invoiceUID);
-    // Implement payment processing logic here
-    bot.sendMessage(chatId, `Payment processed for ${invoiceUID}`);
       default:
           // Handle unknown button click
           bot.sendMessage(chatId, 'Unknown option clicked, please try again.');
