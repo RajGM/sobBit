@@ -49,37 +49,84 @@ bot.onText(/\/help/, (msg) => {
 
 });
 
-bot.onText(/\/addAPI/, async (msg) => {
+bot.onText(/\/addAPI (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id; // Telegram user ID
+  const apiKey = match[1]; 
 
   try {
       // Check if the telegram_id already exists in the users table
-      const userExistsResult = await dbClient.query(
-          'SELECT COUNT(*) FROM users WHERE telegram_id = $1',
-          [userId]
-      );
+      const dbResult = await dbClient.query(
+        'SELECT api_keys FROM users WHERE telegram_id = $1',
+        [userId]
+    );
 
-      const userExists = userExistsResult.rows[0].count > 0;
+      if(dbResult.rows.length>0){
+        //update
 
-      if (!userExists) {
-          // If the user does not exist, insert a new record
-          await dbClient.query(
-              'INSERT INTO users (telegram_id) VALUES ($1)',
-              [userId]
-          );
+        const userData = await fetchUserData(apiKey);
 
-          // Set Redis state for input and send welcome message
-          await client.setEx(`chat:${chatId}:state`, 180, 'awaiting_input'); // Expires after 3 minutes
-          bot.sendMessage(chatId, "Welcome! Please enter your Blink API Key.");
-      } else {
-          // If the user already exists, do nothing
-          await client.setEx(`chat:${chatId}:state`, 180, 'awaiting_input'); // Expires after 3 minutes
-          bot.sendMessage(chatId, "Welcome! Please enter your new Blink API Key to replace the existing one.");
+        printObject(userData, "");
+
+        // Prepare parameters for the database query
+        const params = [apiKey];
+        let updateQuery = `UPDATE users SET api_keys = $1`;
+
+        // Iterate over wallet data and add conditional updates to the query
+        for (const wallet of userData.me.defaultAccount.wallets) {
+            if (wallet.walletCurrency === 'BTC') {
+                params.push(wallet.id); // Add BTC wallet ID to params
+                updateQuery += `, walletid_btc = $${params.length}`;
+            } else if (wallet.walletCurrency === 'USD') {
+                params.push(wallet.id); // Add USD wallet ID to params
+                updateQuery += `, walletid_usd = $${params.length}`;
+            }
+        }
+
+        // Add condition to update only if the telegram_id matches
+        params.push(userId);
+        updateQuery += ` WHERE telegram_id = $${params.length}`;
+        console.log("Insert Query:", updateQuery, "Params:", params)
+
+        // Execute the single database query
+        await dbClient.query(updateQuery, params);
+
+        bot.sendMessage(chatId, "API key and wallet IDs updated successfully.");
+
+      }else{
+        //insert 
+        const userData = await fetchUserData(apiKey);
+
+        printObject(userData, "");
+        
+        // Prepare parameters for the database query
+        const params = [apiKey];
+        let insertQuery = `INSERT INTO users (api_keys, walletid_btc, walletid_usd, telegram_id) VALUES ($1`;
+        
+        // Iterate over wallet data and add conditional updates to the query
+        for (const wallet of userData.me.defaultAccount.wallets) {
+            if (wallet.walletCurrency === 'BTC') {
+                params.push(wallet.id); // Add BTC wallet ID to params
+                insertQuery += `, $${params.length}`;
+            } else if (wallet.walletCurrency === 'USD') {
+                params.push(wallet.id); // Add USD wallet ID to params
+                insertQuery += `, $${params.length}`;
+            }
+        }
+        // Add the telegram_id to params
+        params.push(userId);
+        insertQuery += `, $${params.length})`;
+        console.log("Insert Query:", insertQuery, "Params:", params)
+        // Execute the single database query
+        await dbClient.query(insertQuery, params);
+        
+        bot.sendMessage(chatId, "API key and wallet IDs stored successfully.");
+        
       }
+      
   } catch (err) {
       console.error('Database query error', err.stack);
-      bot.sendMessage(userId, "Error accessing your data. Please try again later.");
+      bot.sendMessage(chatId, "Error accessing your data. Please try again later.");
   }
 });
 
@@ -132,32 +179,56 @@ bot.onText(/\/balance/, async (msg) => {
   }
 });
 
-bot.onText(/\/createInvoice/, async (msg) => { 
+bot.onText(/\/createInvoice (\S+)\s+(\d+)$/i, async (msg, match) => { 
 
   const chatId = msg.chat.id;
   const userId = msg.from.id; // Telegram user ID
+  const walletType = match[1].toUpperCase(); // Extract wallet type directly from command
+  const amountStr = match[2];
+  const amount = parseInt(amountStr, 10); // Convert string to integer
 
   try {
-      // Check if the telegram_id already exists in the users table
-      const userExistsResult = await dbClient.query(
-          'SELECT COUNT(*) FROM users WHERE telegram_id = $1',
-          [userId]
-      );
+    // Check if the telegram_id already exists in the users table
+    const userResult = await dbClient.query(
+        'SELECT api_keys, walletid_btc, walletid_usd FROM users WHERE telegram_id = $1',
+        [userId]
+    );
 
-      const userExists = userExistsResult.rows[0].count > 0;
+    if (userResult.rows.length === 0) {
+        // If the user does not exist, prompt them to register
+        bot.sendMessage(chatId, "Blink API Key doesn't exist. Please add one. Check /help.");
+        return;
+    }
 
-      if (!userExists) {
-          // If the user does not exist, insert a new record
-          bot.sendMessage(chatId, "Welcome! Blink API Key doesn't exists, Please add one Check /help.");
-      } else {
+    // Determine the correct wallet ID based on the wallet type
+    const walletId = walletType === 'BTC' ? userResult.rows[0].walletid_btc : userResult.rows[0].walletid_usd;
 
-        await client.setEx(`chat:${chatId}:state`, 180, 'wallet_amount'); // Expires after 3 minutes
-        bot.sendMessage(chatId, "Please enter the walletType and amount in the format: wallet_Type(BTC or USD) amount(123)");
-      }
-  } catch (err) {
-      console.error('Database query error', err.stack);
-      bot.sendMessage(userId, "Error accessing your data. Please try again later.");
-  }
+    // Fetch the API key and attempt to create an invoice
+    const apiKey = userResult.rows[0].api_keys;
+    const invoiceResponse = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
+
+    if (invoiceResponse==null) {
+      console.log("inside failed invoice null")
+        bot.sendMessage(chatId, "Failed to create invoice. Please try again.");
+        return;
+    }
+
+    const invoiceJSON = JSON.stringify(invoiceResponse);
+    const UUID = uuidv4();
+    const query = 'INSERT INTO invoices (invoice_data, invoice_uuid) VALUES ($1, $2)';
+    await dbClient.query(query, [invoiceJSON, UUID]);
+
+    const currencyType = walletType == "BTC" ? "Sats" : "Cents";
+  const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n*Use this code for payment:* \`${UUID}\``;
+  
+  bot.sendMessage(chatId, detailsMessage, {
+      parse_mode: 'Markdown'
+  });
+
+} catch (error) {
+    console.error('Error during invoice creation process', error);
+    bot.sendMessage(chatId, "Error accessing your data. Please try again later.");
+}
 
 });
 
@@ -166,168 +237,49 @@ bot.onText(/\/pay (\S+)/, async (msg, match) => {
   const userId = msg.from.id; // Telegram user ID
   const invoiceUID = match[1]; // The UUID extracted from the command
 
-  const dbResult = await dbClient.query(
-     'SELECT * FROM users WHERE telegram_id = $1',
-     [userId]
- );
-
- const userExists = dbResult.rows.length > 0;
-
- if(userExists){
-   const apiKey = dbResult.rows[0].api_keys;
-   const uidResult = await dbClient.query(
-     'SELECT * FROM invoices WHERE invoice_uuid = $1',
-     [invoiceUID]
- );
- const walletType = uidResult.rows[0].wallet_type;
- const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
-   const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
-
-
-   if (paymentRequest !== null) {
-     // Assuming sendInvoicePayment is a function that sends the payment request
-     await sendInvoicePayment(apiKey, paymentRequest, walletId);
- 
-     // Assuming bot is your Telegram bot instance
-     bot.sendMessage(chatId, 'Payment Done for invoice: ' + invoiceUID);
-     
- } else {
-     // Handle the case where no payment request is found
-     console.error('No payment request found for invoice:', invoiceUID);
-     await bot.sendMessage(callbackQuery.message.chat.id, 'No payment request found for this invoice.');
- }
-
- }else{
-   const chatId = callbackQuery.message.chat.id;
-   bot.sendMessage(chatId, 'No API Key found. Please add your API key to generate invoices.');
- }
-
-  /*
   try {
       // Check if the user exists in the database
       const userResult = await dbClient.query(
-          'SELECT api_key FROM users WHERE telegram_id = $1',
+          'SELECT * FROM users WHERE telegram_id = $1',
           [userId]
       );
 
       if (userResult.rows.length === 0) {
-          // No user found with that Telegram ID
-          bot.sendMessage(chatId, "Your account is not registered or API key is missing. Please register and set up your API key with /setup.");
-      } else {
-          const apiKey = userResult.rows[0].api_key;
-
-          // Assuming `processPayment` is a function that handles the payment logic
-          const paymentResult = await processPayment(apiKey, uuid);
-          if (paymentResult.success) {
-              bot.sendMessage(chatId, `Payment successful! Transaction ID: ${paymentResult.transactionId}`);
-          } else {
-              bot.sendMessage(chatId, `Payment failed: ${paymentResult.message}`);
-          }
+          bot.sendMessage(chatId, "No API Key found. Please add your API key to generate invoices.");
+          return;
       }
-  } catch (err) {
-      console.error('Error processing payment:', err);
-      bot.sendMessage(chatId, "There was an error processing your payment. Please try again later.");
+
+      // Check if the invoice exists and retrieve it
+      const invoiceResult = await dbClient.query(
+          'SELECT * FROM invoices WHERE invoice_uuid = $1',
+          [invoiceUID]
+      );
+
+      if (invoiceResult.rows.length === 0) {
+          bot.sendMessage(chatId, "No invoice found with ID: " + invoiceUID);
+          return;
+      }
+
+      // Extract invoice and payment details
+      const invoice = invoiceResult.rows[0];
+      const walletType = invoice.wallet_type; // Assumes wallet_type column exists
+      const walletId = walletType === 'BTC' ? userResult.rows[0].walletid_btc : userResult.rows[0].walletid_usd;
+      const paymentRequest = findPaymentRequest(JSON.parse(invoice.invoice_data)); // Assumes invoice_data contains payment request info
+
+      if (!paymentRequest) {
+          bot.sendMessage(chatId, "No payment request found for this invoice.");
+          return;
+      }
+
+      // Send the payment request
+      const apiKey = userResult.rows[0].api_keys;
+      await sendInvoicePayment(apiKey, paymentRequest, walletId);
+      bot.sendMessage(chatId, 'Payment successful for invoice: ' + invoiceUID);
+
+  } catch (error) {
+      console.error('Error during the payment process', error);
+      bot.sendMessage(chatId, "Error processing your payment. Please try again later.");
   }
-*/
-
-});
-
-bot.on('message', async (msg) => {
-
-  const chatId = msg.chat.id;
-  const state = await client.get(`chat:${chatId}:state`);
-  const userId = msg.from.id;
-
-  if (state === 'awaiting_input') {
-      const apiKey = msg.text;
-      const userId = msg.from.id; // Telegram user ID
-
-      try {
-        // Fetch user data from the GraphQL API
-        const userData = await fetchUserData(apiKey);
-
-        printObject(userData, "");
-
-        // Prepare parameters for the database query
-        const params = [apiKey];
-        let updateQuery = `UPDATE users SET api_keys = $1`;
-
-        // Iterate over wallet data and add conditional updates to the query
-        for (const wallet of userData.me.defaultAccount.wallets) {
-            if (wallet.walletCurrency === 'BTC') {
-                params.push(wallet.id); // Add BTC wallet ID to params
-                updateQuery += `, walletid_btc = $${params.length}`;
-            } else if (wallet.walletCurrency === 'USD') {
-                params.push(wallet.id); // Add USD wallet ID to params
-                updateQuery += `, walletid_usd = $${params.length}`;
-            }
-        }
-
-        // Add condition to update only if the telegram_id matches
-        params.push(userId);
-        updateQuery += ` WHERE telegram_id = $${params.length}`;
-
-        //Execute the single database query
-        await dbClient.query(updateQuery, params);
-
-        // Clear Redis state and data
-        await client.del(`chat:${chatId}:state`, `chat:${chatId}:data`);
-
-        bot.sendMessage(chatId, "API key and wallet IDs stored successfully.");
-    } catch (error) {
-        console.error('Error storing API key and wallet IDs:', error);
-        bot.sendMessage(chatId, "An error occurred while storing the API key and wallet IDs.");
-    }
-
-  }
-
-  if(state === 'wallet_amount') {
-    // Create and send the invoice pack
-    console.log("Message Txt:", msg.text)
-
-    const validFormat = msg.text.trim().match(/^(\S+)\s+(\d+)$/i);
-
-    console.log("Valid format:", validFormat);
-
-    if(!validFormat) {
-        bot.sendMessage(chatId, "Invalid input format. Please start invoice generation again with /createInvoice.");
-        return; // Exit the function to prevent further execution
-    }
-
-    try {
-        const walletType = validFormat[1];
-        const amountStr = validFormat[2];
-        const amount = parseInt(amountStr, 10);  // Convert string to integer
-
-        const dbResult = await dbClient.query(
-            'SELECT * FROM users WHERE telegram_id = $1',
-            [userId]
-        );
-
-        if (dbResult.rows.length === 0) {
-            throw new Error("User not found.");
-        }
-
-        // Determine the correct wallet ID based on the wallet type
-        const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
-
-        // Fetch the API key and attempt to create an invoice
-        const apiKey = dbResult.rows[0].api_keys;
-        const getInvoice = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
-        const invoiceJSON = JSON.stringify(getInvoice)
-
-        const UUID = uuidv4();
-        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
-        await dbClient.query(query, [invoiceJSON, UUID, walletType]);
-
-        sendInvoiceDetailsToUser(chatId, UUID, amount, walletType);
-       
-    } catch (error) {
-        console.error("Error during invoice creation process:", error);
-        bot.sendMessage(chatId, `Failed to create invoice due to an ${error}. Please try again.`);
-    }
-}
-
 });
 
 bot.on('callback_query', async (callbackQuery) => {
