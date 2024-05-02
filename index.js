@@ -10,9 +10,9 @@ const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
 const initialMessage = "Welcome! This bot can send and receive sats via Blink. Here are the available commands:\n\n" + 
 "/start or /help - Show all available commands \n\n" + 
-"/addAPI - Adds a new API_Key for your Blink account or replaces it if it already exists\n" +
+"/addAPI apiKey - Add or replace existing Blink APIKey \n" +
 "/balance - Shows the balances in your Blink wallet\n" +
-"/createInvoice - Creates an invoice for USD or sats\n" + 
+"/createInvoice walletType amount - Creates an invoice \n" + 
 "/pay uuid - Pay the invoice using the invoiceID";
 
 // PostgreSQL connection setup
@@ -25,12 +25,6 @@ const dbClient = new Client({
 });
 
 dbClient.connect();
-
-const redis = require('redis');
-const client = redis.createClient({
-    url: 'redis://localhost:6379'  // Adjust the URL if your Redis server is not on localhost
-});
-client.connect();
 
 const { v4: uuidv4 } = require('uuid');
 
@@ -282,6 +276,7 @@ bot.onText(/\/pay (\S+)/, async (msg, match) => {
   }
 });
 
+//fix these then create video
 bot.on('callback_query', async (callbackQuery) => {
   console.log("Inside CallBACK query")
   
@@ -368,7 +363,6 @@ bot.on('callback_query', async (callbackQuery) => {
       const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
         const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
 
-
         if (paymentRequest !== null) {
           // Assuming sendInvoicePayment is a function that sends the payment request
           await sendInvoicePayment(apiKey, paymentRequest, walletId);
@@ -403,99 +397,181 @@ bot.on('inline_query', async (query) => {
   const queryText = query.query.trim().toLowerCase();
   const userId = query.from.id;  
   console.log("QUERY TEXT:", queryText);
-  const results = [];
+  //const results = [];
 
-  if (queryText.startsWith("pay")) {
-    const uuid = queryText.split(" ")[1];  // Assuming the format is "pay UUID"
-    if (uuid) {
-      // Create an article result with payment details
-      results.push({
-        type: 'article',
-        id: uuid,
-        title: 'Confirm Payment',
-        input_message_content: {
-          message_text: `🔹 **Confirm Your Payment**\n\n*Invoice ID:* \`${uuid}\`\n\n`,
-          parse_mode: 'Markdown'
-        },
-        reply_markup: {
-          inline_keyboard: [[
-              { text: "Pay Now", callback_data: `PAY_${uuid}` }
-          ]]
-      },
-        description: `Tap to send and confirm payment for Invoice ID ${uuid}`  // Adding a description for clarity
-      });
-    } else {
-      // Handle the case where UUID might be missing or incorrectly formatted
-      console.error("No UUID found after 'pay' keyword.");
-    }
-  } else if (queryText.startsWith("generateinvoice")) {
-    const args = queryText.split(" ");
-    if (args.length >= 3) {
-      const walletType = args[1].toUpperCase();
-      const amountStr = args[2];
-      const amount = parseInt(amountStr, 10);
+    // Check if the inline query starts with 'addAPI'
+    if (queryText.startsWith('addAPI ')) {
+      const apiKey = queryText.slice(7).trim(); // Extract the API key after 'addAPI '
 
-      const dbResult = await dbClient.query(
-        'SELECT * FROM users WHERE telegram_id = $1',
-        [userId]
-    );
+      try {
+          // Check if the telegram_id already exists in the users table
+          const dbResult = await dbClient.query(
+              'SELECT api_keys FROM users WHERE telegram_id = $1',
+              [userId]
+          );
 
-    console.log("dbResult:",dbResult)
+          let responseMessage;
+          if (dbResult.rows.length > 0) {
+              // User exists, update
+              const userData = await fetchUserData(apiKey);
+              const params = [apiKey];
+              let updateQuery = `UPDATE users SET api_keys = $1`;
 
-    const userExists = dbResult.rows.length > 0;
-      // Assuming checkApiKey function to check if the user has an API key associated
-      if (userExists) {
-        console.log(dbResult.rows[0])
-        // Fetch the API key and attempt to create an invoice
-        const apiKey = dbResult.rows[0].api_keys;
-        const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
-        console.log("API Key:", apiKey, "walletType:", walletType ,"Wallet ID:", walletId, "Amount:", amount)
-        const getInvoice = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
-        const invoiceJSON = JSON.stringify(getInvoice)
+              for (const wallet of userData.me.defaultAccount.wallets) {
+                  if (wallet.walletCurrency === 'BTC') {
+                      params.push(wallet.id);
+                      updateQuery += `, walletid_btc = $${params.length}`;
+                  } else if (wallet.walletCurrency === 'USD') {
+                      params.push(wallet.id);
+                      updateQuery += `, walletid_usd = $${params.length}`;
+                  }
+              }
 
-        const UUID = uuidv4();
-        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
-        const currencyType = walletType == "BTC" ? "Sats" : "Cents";
-        await dbClient.query(query, [invoiceJSON, UUID, walletType]).then(() => {
+              params.push(userId);
+              updateQuery += ` WHERE telegram_id = $${params.length}`;
+              await dbClient.query(updateQuery, params);
+              responseMessage = "API key and wallet IDs updated successfully.";
 
-          results.push({
-            type: 'article',
-            id: UUID, // Assume generateInvoice returns an object with a uuid
-            title: 'Invoice Generated',
-            input_message_content: {
-              message_text: `🔹 **Invoice Generated**\n\n*Invoice ID:* \`${UUID}\`\n*Amount:* \`${amount} ${currencyType}\`\n\nPlease confirm to proceed with the payment.`,
-              parse_mode: 'Markdown'
-            },
-            reply_markup: {
-              inline_keyboard: [[
-                  { text: "Confirm", callback_data: `PAY_${UUID}` }
-              ]]
-          },
-            description: `Invoice for ${amount} ${walletType} ready. Tap to confirm and send.`
-          });
+          } else {
+              // User does not exist, insert
+              const userData = await fetchUserData(apiKey);
+              const params = [apiKey];
+              let insertQuery = `INSERT INTO users (api_keys, walletid_btc, walletid_usd, telegram_id) VALUES ($1`;
 
-        });
-      
-      } else {
-        results.push({
-          type: 'article',
-          id: 'no-api-key',
-          title: 'No API Key Found',
-          input_message_content: {
-            message_text: `🚫 **No API Key Found**\n\nPlease configure your API key to generate invoices.`,
-            parse_mode: 'Markdown'
-          },
-          description: `No API Key found. Please add your API key to generate invoices.`
-        });
+              for (const wallet of userData.me.defaultAccount.wallets) {
+                  if (wallet.walletCurrency === 'BTC') {
+                      params.push(wallet.id);
+                      insertQuery += `, $${params.length}`;
+                  } else if (wallet.walletCurrency === 'USD') {
+                      params.push(wallet.id);
+                      insertQuery += `, $${params.length}`;
+                  }
+              }
+
+              params.push(userId);
+              insertQuery += `, $${params.length})`;
+              await dbClient.query(insertQuery, params);
+              responseMessage = "API key and wallet IDs stored successfully.";
+          }
+
+          // Prepare and send the inline query response
+          const results = [{
+              type: 'article',
+              id: '1',
+              title: responseMessage,
+              input_message_content: {
+                  message_text: responseMessage
+              }
+          }];
+
+          bot.answerInlineQuery(inlineQuery.id, results);
+
+      } catch (err) {
+          console.error('Error handling inline query for addAPI', err);
+          // You cannot send error messages directly to the chat in inline queries, so consider logging this error.
+          const errorMessage = "An error occurred while processing your request. Please try again.";
+          const results = [{
+              type: 'article',
+              id: 'error',
+              title: errorMessage,
+              input_message_content: {
+                  message_text: errorMessage
+              }
+          }];
+
+          bot.answerInlineQuery(inlineQuery.id, results);
       }
-    }
-  } else {
-    console.log("Query does not match expected commands.");
   }
 
-  bot.answerInlineQuery(query.id, results).catch(error => {
-    console.error("Failed to answer inline query:", error);
-  });
+  // if (queryText.startsWith("pay")) {
+  //   const uuid = queryText.split(" ")[1];  // Assuming the format is "pay UUID"
+  //   if (uuid) {
+  //     // Create an article result with payment details
+  //     results.push({
+  //       type: 'article',
+  //       id: uuid,
+  //       title: 'Confirm Payment',
+  //       input_message_content: {
+  //         message_text: `🔹 **Confirm Your Payment**\n\n*Invoice ID:* \`${uuid}\`\n\n`,
+  //         parse_mode: 'Markdown'
+  //       },
+  //       reply_markup: {
+  //         inline_keyboard: [[
+  //             { text: "Pay Now", callback_data: `PAY_${uuid}` }
+  //         ]]
+  //     },
+  //       description: `Tap to send and confirm payment for Invoice ID ${uuid}`  // Adding a description for clarity
+  //     });
+  //   } else {
+  //     // Handle the case where UUID might be missing or incorrectly formatted
+  //     console.error("No UUID found after 'pay' keyword.");
+  //   }
+  // } else if (queryText.startsWith("generateinvoice")) {
+  //   const args = queryText.split(" ");
+  //   if (args.length >= 3) {
+  //     const walletType = args[1].toUpperCase();
+  //     const amountStr = args[2];
+  //     const amount = parseInt(amountStr, 10);
+
+  //     const dbResult = await dbClient.query(
+  //       'SELECT * FROM users WHERE telegram_id = $1',
+  //       [userId]
+  //   );
+
+  //   console.log("dbResult:",dbResult)
+
+  //   const userExists = dbResult.rows.length > 0;
+  //     // Assuming checkApiKey function to check if the user has an API key associated
+  //     if (userExists) {
+  //       console.log(dbResult.rows[0])
+  //       // Fetch the API key and attempt to create an invoice
+  //       const apiKey = dbResult.rows[0].api_keys;
+  //       const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
+  //       console.log("API Key:", apiKey, "walletType:", walletType ,"Wallet ID:", walletId, "Amount:", amount)
+  //       const getInvoice = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
+  //       const invoiceJSON = JSON.stringify(getInvoice)
+
+  //       const UUID = uuidv4();
+  //       const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
+  //       const currencyType = walletType == "BTC" ? "Sats" : "Cents";
+  //       await dbClient.query(query, [invoiceJSON, UUID, walletType]).then(() => {
+
+  //         results.push({
+  //           type: 'article',
+  //           id: UUID, // Assume generateInvoice returns an object with a uuid
+  //           title: 'Invoice Generated',
+  //           input_message_content: {
+  //             message_text: `🔹 **Invoice Generated**\n\n*Invoice ID:* \`${UUID}\`\n*Amount:* \`${amount} ${currencyType}\`\n\nPlease confirm to proceed with the payment.`,
+  //             parse_mode: 'Markdown'
+  //           },
+  //           reply_markup: {
+  //             inline_keyboard: [[
+  //                 { text: "Confirm", callback_data: `PAY_${UUID}` }
+  //             ]]
+  //         },
+  //           description: `Invoice for ${amount} ${walletType} ready. Tap to confirm and send.`
+  //         });
+
+  //       });
+      
+  //     } else {
+  //       results.push({
+  //         type: 'article',
+  //         id: 'no-api-key',
+  //         title: 'No API Key Found',
+  //         input_message_content: {
+  //           message_text: `🚫 **No API Key Found**\n\nPlease configure your API key to generate invoices.`,
+  //           parse_mode: 'Markdown'
+  //         },
+  //         description: `No API Key found. Please add your API key to generate invoices.`
+  //       });
+  //     }
+  //   }
+  // }
+
+  // bot.answerInlineQuery(query.id, results).catch(error => {
+  //   console.error("Failed to answer inline query:", error);
+  // });
 });
 
 async function fetchUserData(blinkKey) {
@@ -531,20 +607,6 @@ async function fetchUserData(blinkKey) {
   } catch (error) {
       console.error('Error making the request:', error);
       throw error;
-  }
-}
-
-function printObject(obj, indent) {
-  for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-          const value = obj[key];
-          console.log(`${indent}${key}:`);
-          if (value !== null && typeof value === 'object') {
-              printObject(value, indent + '  ');
-          } else {
-              console.log(`${indent}  ${value}`);
-          }
-      }
   }
 }
 
@@ -687,15 +749,6 @@ async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
     }
 }
 
-function sendInvoiceDetailsToUser(chatId, invoiceUID, amount, walletType) {
-  const currencyType = walletType == "BTC" ? "Sats" : "Cents";
-  const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n*Use this code for payment:* \`${invoiceUID}\``;
-  
-  bot.sendMessage(chatId, detailsMessage, {
-      parse_mode: 'Markdown'
-  });
-}
-
 function findPaymentRequest(obj) {
 
   // If not, check if the current value is an object and search within it recursively
@@ -709,4 +762,18 @@ function findPaymentRequest(obj) {
   }
 
   return null;  // Return null if no paymentRequest is found
+}
+
+function printObject(obj, indent) {
+  for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+          const value = obj[key];
+          console.log(`${indent}${key}:`);
+          if (value !== null && typeof value === 'object') {
+              printObject(value, indent + '  ');
+          } else {
+              console.log(`${indent}  ${value}`);
+          }
+      }
+  }
 }
