@@ -281,7 +281,6 @@ bot.onText(/\/pay (\S+)/, async (msg, match) => {
 bot.on('callback_query', async (callbackQuery) => {
   console.log("Inside CallBACK query")
   
-  //const chatId =  callbackQuery.inline_message_id?callbackQuery.inline_message_id : callbackQuery.message.chat.id;
   const data = callbackQuery.data;
   console.log("Whole DATA: ", data)
   const action = data.split('_')[0];  // Get the action part
@@ -348,12 +347,65 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 
     break;
- 
+
+    case 'BALANCE':
+        try {
+            // Retrieve Blink API key from the database based on the Telegram user ID
+            const dbResult = await dbClient.query(
+                'SELECT api_keys FROM users WHERE telegram_id = $1',
+                [userId]
+            );
+      
+            if (dbResult.rows.length > 0) {
+                // Blink API key found in the database
+                const blinkKey = dbResult.rows[0].api_keys;
+      
+                // Fetch balance via Blink API
+                const userData = await fetchUserData(blinkKey);
+                let balanceArray = {};
+      
+                // Iterate over wallet data and store balances in the balanceArray
+                for (const wallet of userData.me.defaultAccount.wallets) {
+                    if (wallet.walletCurrency === 'BTC') {
+                        balanceArray.BTC = wallet.balance;
+                    } else if (wallet.walletCurrency === 'USD') {
+                        balanceArray.USD = wallet.balance;
+                    }
+                }
+      
+                // Construct message content based on the balanceArray
+                let message = "Your balances:\n";
+                if (balanceArray.BTC !== undefined) {
+                    message += `BTC Wallet: ${balanceArray.BTC} sats\n`;
+                }
+                if (balanceArray.USD !== undefined) {
+                    message += `USD Wallet: ${balanceArray.USD} cents\n`;
+                }
+                
+                bot.editMessageText(message,{
+                    inline_message_id: callbackQuery.inline_message_id
+                });
+            } else {
+                // Blink API key not found in the database
+                bot.editMessageText("Blink API key not found. Please use /addAPI command to save your Blink API key.",{
+                    inline_message_id: callbackQuery.inline_message_id
+                });
+            }
+        } catch (error) {
+            // Error handling
+            console.error('Failed to retrieve balance:', error);
+            bot.sendMessage(msg.chat.id, "Failed to retrieve balance. Please try again.");
+        }
+
+    break;
+
+    
+    
+
       default:
         console.log('Unknown inline first part action');
         break;
     }
-
   } 
   
 });
@@ -381,13 +433,42 @@ bot.on('inline_query', async (query) => {
             
         }];
         
-                try {
+        try {
             await bot.answerInlineQuery(query.id, results);
             console.log("Inline query with button answered successfully.");
         } catch (err) {
             console.error("Failed to answer inline query with button:", err);
         }
           
+    }
+
+    if(queryText.startsWith('createinvoice')){
+
+    }
+
+    if(queryText.startsWith('balance')){
+        const userId = query.from.id; // Telegram user ID
+        const results = [{
+            type: 'article',
+            id: '1',
+            title: 'Check Balance',
+            input_message_content: {
+                message_text: `This is a test to check balance: ${userId}`
+            },
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "Click Me", callback_data: `BALANCE_${userId}` } // Append API key
+                ]]
+            }
+            
+        }];
+        
+        try {
+            await bot.answerInlineQuery(query.id, results);
+            console.log("Inline query with button answered successfully.");
+        } catch (err) {
+            console.error("Failed to answer inline query with button:", err);
+        }
     }
    
 });
