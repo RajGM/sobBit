@@ -207,10 +207,10 @@ bot.onText(/\/createInvoice (\S+)\s+(\d+)$/i, async (msg, match) => {
         return;
     }
 
-    const invoiceJSON = JSON.stringify(invoiceResponse);
+    const invoiceJSON = invoiceResponse;
     const UUID = uuidv4();
-    const query = 'INSERT INTO invoices (invoice_data, invoice_uuid) VALUES ($1, $2)';
-    await dbClient.query(query, [invoiceJSON, UUID]);
+    const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
+    await dbClient.query(query, [invoiceJSON, UUID, walletType]);
 
     const currencyType = walletType == "BTC" ? "Sats" : "Cents";
   const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n*Use this code for payment:* \`${UUID}\``;
@@ -256,9 +256,10 @@ bot.onText(/\/pay (\S+)/, async (msg, match) => {
 
       // Extract invoice and payment details
       const invoice = invoiceResult.rows[0];
+      console.log("Invoice:", invoice)
       const walletType = invoice.wallet_type; // Assumes wallet_type column exists
       const walletId = walletType === 'BTC' ? userResult.rows[0].walletid_btc : userResult.rows[0].walletid_usd;
-      const paymentRequest = findPaymentRequest(JSON.parse(invoice.invoice_data)); // Assumes invoice_data contains payment request info
+      const paymentRequest = findPaymentRequest(invoice.invoice_data); // Assumes invoice_data contains payment request info
 
       if (!paymentRequest) {
           bot.sendMessage(chatId, "No payment request found for this invoice.");
@@ -282,61 +283,72 @@ bot.on('callback_query', async (callbackQuery) => {
   
   //const chatId =  callbackQuery.inline_message_id?callbackQuery.inline_message_id : callbackQuery.message.chat.id;
   const data = callbackQuery.data;
+  console.log("Whole DATA: ", data)
   const action = data.split('_')[0];  // Get the action part
-  const invoiceUID = data.split('_')[1];  // Get the UID part, present in all cases now
-
-  console.log("InvoiceID: ", invoiceUID)
 
   if(callbackQuery.inline_message_id){
-
+    const invoiceUID = data.split('_')[1];
+    const userId = callbackQuery.from.id; 
+       
     switch (action) {
       case 'PAY':
-       const userId = callbackQuery.from.id; 
-       const dbResult = await dbClient.query(
-          'SELECT * FROM users WHERE telegram_id = $1',
-          [userId]
-      );
-
-      const userExists = dbResult.rows.length > 0;
-
-      if(userExists){
-        const apiKey = dbResult.rows[0].api_keys;
-        const uidResult = await dbClient.query(
-          'SELECT * FROM invoices WHERE invoice_uuid = $1',
-          [invoiceUID]
-      );
-      const walletType = uidResult.rows[0].wallet_type;
-      const walletId = walletType === 'BTC' ? dbResult.rows[0].walletid_btc : dbResult.rows[0].walletid_usd;
-        const paymentRequest = findPaymentRequest(JSON.parse(uidResult.rows[0]));
-
-        if (paymentRequest !== null) {
-          // Assuming sendInvoicePayment is a function that sends the payment request
-          await sendInvoicePayment(apiKey, paymentRequest, walletId);
-      
-          // Assuming bot is your Telegram bot instance
-          await bot.editMessageText(`Action ${action} for invoice ${invoiceUID} processed`, {
-              inline_message_id: callbackQuery.inline_message_id
-          });
-      } else {
-          // Handle the case where no payment request is found
-          console.error('No payment request found for invoice:', invoiceUID);
-          await bot.sendMessage(callbackQuery.message.chat.id, 'No payment request found for this invoice.');
-      }
-
-      }else{
-        const chatId = callbackQuery.message.chat.id;
-        bot.sendMessage(chatId, 'No API Key found. Please add your API key to generate invoices.');
-      }
-
-        break;
-
-        case 'testButton':
-            //const chatId = callbackQuery.message.chat.id;
-            bot.answerCallbackQuery(callbackQuery.inline_message_id, {
-                text: `You clicked the test button! ${invoiceUID}`,
-                show_alert: true
+        
+      try {
+        // Check if the user exists in the database
+        const userResult = await dbClient.query(
+            'SELECT * FROM users WHERE telegram_id = $1',
+            [userId]
+        );
+  
+        if (userResult.rows.length === 0) {
+            bot.editMessageText("No API Key found. Please add your API key to generate invoices.:" + invoiceUID,{
+                inline_message_id: callbackQuery.inline_message_id
             });
-            break;
+        }
+  
+        // Check if the invoice exists and retrieve it
+        const invoiceResult = await dbClient.query(
+            'SELECT * FROM invoices WHERE invoice_uuid = $1',
+            [invoiceUID]
+        );
+  
+        if (invoiceResult.rows.length === 0) {
+            bot.editMessageText("No invoice found with ID: " + invoiceUID,{
+                inline_message_id: callbackQuery.inline_message_id
+            });
+            return;
+        }
+  
+        // Extract invoice and payment details
+        const invoice = invoiceResult.rows[0];
+        console.log("Invoice:", invoice)
+        const walletType = invoice.wallet_type; // Assumes wallet_type column exists
+        const walletId = walletType === 'BTC' ? userResult.rows[0].walletid_btc : userResult.rows[0].walletid_usd;
+        const paymentRequest = findPaymentRequest(invoice.invoice_data); // Assumes invoice_data contains payment request info
+  
+        if (!paymentRequest) {
+            bot.editMessageText("No payment request found for this invoice." + invoiceUID,{
+                inline_message_id: callbackQuery.inline_message_id
+            });
+            return;
+        }
+  
+        // Send the payment request
+        const apiKey = userResult.rows[0].api_keys;
+        await sendInvoicePayment(apiKey, paymentRequest, walletId);
+        bot.editMessageText("Payment successful for invoice:" + invoiceUID,{
+            inline_message_id: callbackQuery.inline_message_id
+        });
+        
+    } catch (error) {
+        console.error('Error during the payment process', error);
+        bot.editMessageText("Error processing your payment. Please try again later." + invoiceUID,{
+            inline_message_id: callbackQuery.inline_message_id
+        });
+    }
+
+    break;
+ 
       default:
         console.log('Unknown inline first part action');
         break;
@@ -350,36 +362,35 @@ bot.on('inline_query', async (query) => {
   console.log("Inline QUERY");
   const queryText = query.query.trim().toLowerCase();
 
-    if(queryText.startsWith('addapi')){
-      const apiKey = queryText.slice(7).trim(); // Extract the API key after '
-      console.log("Extracted API Key:", apiKey);  // Debugging output to verify the API key extraction
+    if(queryText.startsWith('pay')){
+        const uuid = queryText.slice(4).trim(); // Extract the API key after '
+        console.log("Extracted UUID:", uuid);  // Debugging output to verify the API key extraction
 
-      const results = [{
-    type: 'article',
-    id: '1',
-    title: 'Test with Button',
-    input_message_content: {
-        message_text: 'This is a test message with a button.'
-    },
-    reply_markup: {
-        inline_keyboard: [[
-            { text: "Click Me", callback_data: `testButton_${apiKey}` }
-        ]]
-    }
-}];
-
-        try {
-    await bot.answerInlineQuery(query.id, results);
-    console.log("Inline query with button answered successfully.");
-} catch (err) {
-    console.error("Failed to answer inline query with button:", err);
-}
+        const results = [{
+            type: 'article',
+            id: '1',
+            title: 'Test with UUID Button',
+            input_message_content: {
+                message_text: `This is a test UUID with a button ${uuid}`
+            },
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "Click Me", callback_data: `PAY_${uuid}` } // Append API key
+                ]]
+            }
+            
+        }];
         
+                try {
+            await bot.answerInlineQuery(query.id, results);
+            console.log("Inline query with button answered successfully.");
+        } catch (err) {
+            console.error("Failed to answer inline query with button:", err);
+        }
+          
     }
-
    
 });
-
 
 async function fetchUserData(blinkKey) {
   const url = 'https://api.blink.sv/graphql';
@@ -557,18 +568,40 @@ async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
 }
 
 function findPaymentRequest(obj) {
+    // Check if the object has the key 'paymentRequest' directly
+    if (obj.hasOwnProperty('paymentRequest')) {
+        return obj.paymentRequest; // Return the paymentRequest directly if found
+    }
 
-  // If not, check if the current value is an object and search within it recursively
-  for (const key in obj) {
-      if (obj.hasOwnProperty(key) && typeof obj[key] === 'object') {
-          const result = findPaymentRequest(obj[key]);
-          if (result !== null) {
-              return result;  // Return the found paymentRequest
-          }
-      }
-  }
+    // If not, check if the current value is an object or an array and search within it recursively
+    for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            const value = obj[key];
 
-  return null;  // Return null if no paymentRequest is found
+            // Check if the value is an object or an array, and it's not null
+            if (value !== null && typeof value === 'object') {
+                let result = null;
+
+                // If it's an array, iterate over each item
+                if (Array.isArray(value)) {
+                    for (const item of value) {
+                        result = findPaymentRequest(item);
+                        if (result !== null) {
+                            return result; // Return as soon as a paymentRequest is found within the array
+                        }
+                    }
+                } else {
+                    // Recurse into the object
+                    result = findPaymentRequest(value);
+                    if (result !== null) {
+                        return result; // Return as soon as a paymentRequest is found
+                    }
+                }
+            }
+        }
+    }
+
+    return null;  // Return null if no paymentRequest is found after checking all properties
 }
 
 function printObject(obj, indent) {
