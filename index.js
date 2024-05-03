@@ -399,7 +399,94 @@ bot.on('callback_query', async (callbackQuery) => {
 
     break;
 
+    case 'INVOICE':
+        const parts = data.split('_');
+
+        const walletType = parts[1];
+        const amount = parts[2];
+
+    try {
+        // Check if the telegram_id already exists in the users table
+        const userResult = await dbClient.query(
+            'SELECT api_keys, walletid_btc, walletid_usd FROM users WHERE telegram_id = $1',
+            [userId]
+        );
     
+        if (userResult.rows.length === 0) {
+            // If the user does not exist, prompt them to register
+            bot.editMessageText("Blink API Key doesn't exist. Please add one.",{
+                inline_message_id: callbackQuery.inline_message_id
+            });
+            return;
+        }
+    
+        // Determine the correct wallet ID based on the wallet type
+        const walletId = walletType === 'BTC' ? userResult.rows[0].walletid_btc : userResult.rows[0].walletid_usd;
+    
+        // Fetch the API key and attempt to create an invoice
+        const apiKey = userResult.rows[0].api_keys;
+        const invoiceResponse = await createInvoiceOnBehalfOfRecipient(apiKey, walletType, walletId, amount);
+    
+        if (invoiceResponse==null) {
+          console.log("inside failed invoice null")
+          bot.editMessageText("Failed to create invoice. Please try again.",{
+            inline_message_id: callbackQuery.inline_message_id
+        });
+            return;
+        }
+    
+        const invoiceJSON = invoiceResponse;
+        const UUID = uuidv4();
+        const query = 'INSERT INTO invoices (invoice_data, invoice_uuid, wallet_type) VALUES ($1, $2, $3)';
+        await dbClient.query(query, [invoiceJSON, UUID, walletType]);
+    
+        const currencyType = walletType == "BTC" ? "Sats" : "Cents";
+        const detailsMessage = `Pay the invoice for amount: ${amount} ${currencyType}\n*Use this code for payment:* \`${UUID}\``;
+      
+    bot.editMessageText(detailsMessage,{
+        inline_message_id: callbackQuery.inline_message_id,
+        parse_mode: 'Markdown' 
+    });
+
+    // const UUID = "123123"
+    //   const results = [{
+    //     type: 'article',
+    //     id: '1',
+    //     title: 'Test with UUID Button',
+    //     input_message_content: {
+    //         message_text: "TEST MESSAGE"
+    //     },
+    //     reply_markup: {
+    //         inline_keyboard: [[
+    //             { text: "Click Me", callback_data: `PAY_${UUID}` } // Append API key
+    //         ]]
+    //     }}];
+
+    //     console.log("CALLBACL QUERY ID:", callbackQuery)
+    //     console.log("BEFORE SENDING")
+    //     //await bot.answerInlineQuery(callbackQuery.id, results);
+    //     console.log("AFTER SENDING")
+
+    //     const keyboard = {
+    //         inline_keyboard: [[
+    //             { text: "Click Me", callback_data: `PAY_${UUID}` } // Append API key or any identifier
+    //         ]]
+    //     };
+
+    //     bot.sendMessage(callbackQuery.chat_instance, "TEST MESSAGE", {
+    //         reply_markup:keyboard
+    //     });
+
+
+    }
+    catch (error) {
+        console.error('Error during invoice creation process', error);
+        bot.editMessageText("Error accessing your data. Please try again later.",{
+            inline_message_id: callbackQuery.inline_message_id
+        });
+    }
+
+    break;
     
 
       default:
@@ -443,6 +530,42 @@ bot.on('inline_query', async (query) => {
     }
 
     if(queryText.startsWith('createinvoice')){
+        const args = queryText.slice('createinvoice'.length).trim();
+        const parts = args.split(' ');
+
+        if (parts.length === 2) {
+            const walletType = parts[0];  // btc or usd
+            const amount = parts[1];     // the amount to invoice
+
+            const invoiceText = `An invoice for ${amount} ${walletType.toUpperCase()}`;
+    bot.answerInlineQuery(query.id ,[{
+        type: 'article',
+        id: '1',
+        title: `Create Invoice for ${amount} ${walletType.toUpperCase()}`,
+        input_message_content: {
+            message_text: invoiceText
+        },
+        reply_markup: {
+            inline_keyboard: [[
+                {
+                    text: "Confirm Invoice",
+                    callback_data: `INVOICE_${walletType}_${amount}` // Encoding wallet type and amount in callback data
+                }
+            ]]
+        }
+    }]);
+
+
+        }else{
+            await bot.answerInlineQuery(query.id, [{
+                type: 'article',
+                id: '1',
+                title: 'Incorrect Format',
+                input_message_content: {
+                    message_text: `Please use the format: createinvoice walletType amount`
+                }
+            }]);
+        }
 
     }
 
