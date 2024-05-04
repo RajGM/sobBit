@@ -448,36 +448,6 @@ bot.on('callback_query', async (callbackQuery) => {
         parse_mode: 'Markdown' 
     });
 
-    // const UUID = "123123"
-    //   const results = [{
-    //     type: 'article',
-    //     id: '1',
-    //     title: 'Test with UUID Button',
-    //     input_message_content: {
-    //         message_text: "TEST MESSAGE"
-    //     },
-    //     reply_markup: {
-    //         inline_keyboard: [[
-    //             { text: "Click Me", callback_data: `PAY_${UUID}` } // Append API key
-    //         ]]
-    //     }}];
-
-    //     console.log("CALLBACL QUERY ID:", callbackQuery)
-    //     console.log("BEFORE SENDING")
-    //     //await bot.answerInlineQuery(callbackQuery.id, results);
-    //     console.log("AFTER SENDING")
-
-    //     const keyboard = {
-    //         inline_keyboard: [[
-    //             { text: "Click Me", callback_data: `PAY_${UUID}` } // Append API key or any identifier
-    //         ]]
-    //     };
-
-    //     bot.sendMessage(callbackQuery.chat_instance, "TEST MESSAGE", {
-    //         reply_markup:keyboard
-    //     });
-
-
     }
     catch (error) {
         console.error('Error during invoice creation process', error);
