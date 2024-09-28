@@ -1,4 +1,5 @@
 require('dotenv').config()
+//const dotenv = require('dotenv')
 
 const { Telegraf } = require('telegraf');
 const { Client } = require('pg');
@@ -29,57 +30,64 @@ dbClient.connect();
 bot.start((ctx) => ctx.reply(initialMessage));
 bot.help((ctx) => ctx.reply(initialMessage));
 
+const buildAuthorizationUrl = require('./utils');
+
 bot.command('addAPI', async (ctx) => {
   const userId = ctx.from.id;
-  const apiKey = ctx.message.text.split(' ')[1];
+  //const apiKey = ctx.message.text.split(' ')[1];
 
   try {
-    const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegram_id = $1', [userId]);
+    //const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegram_id = $1', [userId]);
 
-    const userData = await fetchUserData(apiKey);
-    printObject(userData, "");
+    const authorizationUrl = buildAuthorizationUrl(userId);
 
-    if (dbResult.rows.length > 0) {
-      const params = [apiKey];
-      let updateQuery = `UPDATE users SET api_keys = $1`;
+    // const userData = await fetchUserData(apiKey);
+    printObject("authorizationUrl:", authorizationUrl);
 
-      for (const wallet of userData.me.defaultAccount.wallets) {
-        if (wallet.walletCurrency === 'BTC') {
-          params.push(wallet.id);
-          updateQuery += `, walletid_btc = $${params.length}`;
-        } else if (wallet.walletCurrency === 'USD') {
-          params.push(wallet.id);
-          updateQuery += `, walletid_usd = $${params.length}`;
-        }
-      }
+    ctx.reply(`Click this link to authorize the app and connect your account: ${authorizationUrl}`);
 
-      params.push(userId);
-      updateQuery += ` WHERE telegram_id = $${params.length}`;
-      console.log("Update Query:", updateQuery, "Params:", params);
+    // if (dbResult.rows.length > 0) {
+    //   const params = [apiKey];
+    //   let updateQuery = `UPDATE users SET api_keys = $1`;
 
-      await dbClient.query(updateQuery, params);
-      ctx.reply("API key and wallet IDs updated successfully.");
-    } else {
-      const params = [apiKey];
-      let insertQuery = `INSERT INTO users (api_keys, walletid_btc, walletid_usd, telegram_id) VALUES ($1`;
+    //   for (const wallet of userData.me.defaultAccount.wallets) {
+    //     if (wallet.walletCurrency === 'BTC') {
+    //       params.push(wallet.id);
+    //       updateQuery += `, walletid_btc = $${params.length}`;
+    //     } else if (wallet.walletCurrency === 'USD') {
+    //       params.push(wallet.id);
+    //       updateQuery += `, walletid_usd = $${params.length}`;
+    //     }
+    //   }
 
-      for (const wallet of userData.me.defaultAccount.wallets) {
-        if (wallet.walletCurrency === 'BTC') {
-          params.push(wallet.id);
-          insertQuery += `, $${params.length}`;
-        } else if (wallet.walletCurrency === 'USD') {
-          params.push(wallet.id);
-          insertQuery += `, $${params.length}`;
-        }
-      }
+    //   params.push(userId);
+    //   updateQuery += ` WHERE telegram_id = $${params.length}`;
+    //   console.log("Update Query:", updateQuery, "Params:", params);
 
-      params.push(userId);
-      insertQuery += `, $${params.length})`;
-      console.log("Insert Query:", insertQuery, "Params:", params);
+    //   await dbClient.query(updateQuery, params);
+    //   ctx.reply("API key and wallet IDs updated successfully.");
+    // } else {
+    //   const params = [apiKey];
+    //   let insertQuery = `INSERT INTO users (api_keys, walletid_btc, walletid_usd, telegram_id) VALUES ($1`;
 
-      await dbClient.query(insertQuery, params);
-      ctx.reply("API key and wallet IDs stored successfully.");
-    }
+    //   for (const wallet of userData.me.defaultAccount.wallets) {
+    //     if (wallet.walletCurrency === 'BTC') {
+    //       params.push(wallet.id);
+    //       insertQuery += `, $${params.length}`;
+    //     } else if (wallet.walletCurrency === 'USD') {
+    //       params.push(wallet.id);
+    //       insertQuery += `, $${params.length}`;
+    //     }
+    //   }
+
+    //   params.push(userId);
+    //   insertQuery += `, $${params.length})`;
+    //   console.log("Insert Query:", insertQuery, "Params:", params);
+
+    //   await dbClient.query(insertQuery, params);
+    //   ctx.reply("API key and wallet IDs stored successfully.");
+    // }
+
   } catch (err) {
     console.error('Database query error', err.stack);
     ctx.reply("Error accessing your data. Please try again later.");
@@ -87,7 +95,7 @@ bot.command('addAPI', async (ctx) => {
 });
 
 bot.command('balance', async (ctx) => {
-    console.log("INSIDEBALANCE:", ctx.from.id)
+  console.log("INSIDEBALANCE:", ctx.from.id)
   const userId = ctx.from.id;
 
   try {
