@@ -26,7 +26,6 @@ const dbClient = new Client({
 
 dbClient.connect();
 
-
 // Middleware to log all incoming requests
 app.all('*', async (req, res) => {
   // Log request details
@@ -37,13 +36,13 @@ app.all('*', async (req, res) => {
   // Check if code and state exist in the query
   if (authorizationCode && state) {
     // Call the getToken function with the extracted code and state
-    console.log("TOKEN:", token);
 
-    // Store the token in the database
-    await storeToken(state, token);
+    const token = await getToken(authorizationCode, state);
+
+    logTokenToConsole(state, token);
+    storeToken(state, token);
 
     // Log token to the console (replace this with Telegram bot action later)
-    logTokenToConsole(state, token);
 
     res.send(`Code and state received. Token Saved Authorization code: ${authorizationCode}, State: ${state}`);
   } else {
@@ -51,8 +50,6 @@ app.all('*', async (req, res) => {
     res.status(400).send('Missing code or state in the request');
   }
 
-  // Send a response
-  res.send('Request received and logged.');
 });
 
 // Error handling middleware for aborted requests

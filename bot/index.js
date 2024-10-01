@@ -37,56 +37,11 @@ bot.command('addAPI', async (ctx) => {
   //const apiKey = ctx.message.text.split(' ')[1];
 
   try {
-    //const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegram_id = $1', [userId]);
-
     const authorizationUrl = buildAuthorizationUrl(userId);
-    //check if last key generated was 55 minutes ago then ask to regenerate or proceed
-    // const userData = await fetchUserData(apiKey);
+
     printObject("authorizationUrl:", authorizationUrl);
 
     ctx.reply(`Click this link to authorize the app and connect your account: ${authorizationUrl}`);
-
-    // if (dbResult.rows.length > 0) {
-    //   const params = [apiKey];
-    //   let updateQuery = `UPDATE users SET api_keys = $1`;
-
-    //   for (const wallet of userData.me.defaultAccount.wallets) {
-    //     if (wallet.walletCurrency === 'BTC') {
-    //       params.push(wallet.id);
-    //       updateQuery += `, walletid_btc = $${params.length}`;
-    //     } else if (wallet.walletCurrency === 'USD') {
-    //       params.push(wallet.id);
-    //       updateQuery += `, walletid_usd = $${params.length}`;
-    //     }
-    //   }
-
-    //   params.push(userId);
-    //   updateQuery += ` WHERE telegram_id = $${params.length}`;
-    //   console.log("Update Query:", updateQuery, "Params:", params);
-
-    //   await dbClient.query(updateQuery, params);
-    //   ctx.reply("API key and wallet IDs updated successfully.");
-    // } else {
-    //   const params = [apiKey];
-    //   let insertQuery = `INSERT INTO users (api_keys, walletid_btc, walletid_usd, telegram_id) VALUES ($1`;
-
-    //   for (const wallet of userData.me.defaultAccount.wallets) {
-    //     if (wallet.walletCurrency === 'BTC') {
-    //       params.push(wallet.id);
-    //       insertQuery += `, $${params.length}`;
-    //     } else if (wallet.walletCurrency === 'USD') {
-    //       params.push(wallet.id);
-    //       insertQuery += `, $${params.length}`;
-    //     }
-    //   }
-
-    //   params.push(userId);
-    //   insertQuery += `, $${params.length})`;
-    //   console.log("Insert Query:", insertQuery, "Params:", params);
-
-    //   await dbClient.query(insertQuery, params);
-    //   ctx.reply("API key and wallet IDs stored successfully.");
-    // }
 
   } catch (err) {
     console.error('Database query error', err.stack);
@@ -95,42 +50,64 @@ bot.command('addAPI', async (ctx) => {
 });
 
 bot.command('balance', async (ctx) => {
-  console.log("INSIDEBALANCE:", ctx.from.id)
+  console.log("INSIDEBALANCE:", ctx.from.id);
   const userId = ctx.from.id;
 
   try {
-    const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegram_id = $1', [userId]);
+    const dbResult = await dbClient.query('SELECT * FROM users WHERE telegramId = $1', [userId]);
+
+    // Log the dbResult for debugging
+    console.log('DB Result:', dbResult.rows);
 
     if (dbResult.rows.length > 0) {
-      const blinkKey = dbResult.rows[0].api_keys;
-      const userData = await fetchUserData(blinkKey);
-      let balanceArray = {};
+      const createdTime = dbResult.rows[0].created;
+      console.log('Created Time:', createdTime);
 
-      for (const wallet of userData.me.defaultAccount.wallets) {
-        if (wallet.walletCurrency === 'BTC') {
-          balanceArray.BTC = wallet.balance;
-        } else if (wallet.walletCurrency === 'USD') {
-          balanceArray.USD = wallet.balance;
+      const isTokenValid = isLessThanFiftyMinutes(createdTime);
+      console.log('Is Token Valid (less than 50 minutes):', isTokenValid);
+
+      if (isTokenValid) {
+        const token = dbResult.rows[0].token;
+
+        if (!token) {
+          ctx.reply("Token is missing. Please use /addAPI to generate your Token key.");
+          return;
         }
-      }
 
-      let message = "Your balances:\n";
-      if (balanceArray.BTC !== undefined) {
-        message += `BTC Wallet: ${balanceArray.BTC} sats\n`;
-      }
-      if (balanceArray.USD !== undefined) {
-        message += `USD Wallet: ${balanceArray.USD} cents\n`;
-      }
+        const userData = await fetchUserDataNew(token);
+        let balanceArray = {};
 
-      ctx.reply(message);
+        for (const wallet of userData.me.defaultAccount.wallets) {
+          if (wallet.walletCurrency === 'BTC') {
+            balanceArray.BTC = wallet.balance;
+          } else if (wallet.walletCurrency === 'USD') {
+            balanceArray.USD = wallet.balance;
+          }
+        }
+
+        let message = "Your balances:\n";
+        if (balanceArray.BTC !== undefined) {
+          message += `BTC Wallet: ${balanceArray.BTC} sats\n`;
+        }
+        if (balanceArray.USD !== undefined) {
+          message += `USD Wallet: ${balanceArray.USD} cents\n`;
+        }
+
+        ctx.reply(message);
+      } else {
+        console.log("Token is expired or not found.");
+        ctx.reply("Token key not found or expired. Please use /addAPI command to generate your Token key.");
+      }
     } else {
-      ctx.reply("Blink API key not found. Please use /addAPI command to save your Blink API key.");
+      console.log("No rows found for user in the database.");
+      ctx.reply("Token key not found or expired. Please use /addAPI command to generate your Token key.");
     }
   } catch (error) {
     console.error('Failed to retrieve balance:', error);
     ctx.reply("Failed to retrieve balance. Please try again.");
   }
 });
+
 
 bot.command('createInvoice', async (ctx) => {
   const userId = ctx.from.id;
@@ -139,7 +116,7 @@ bot.command('createInvoice', async (ctx) => {
   const amount = parseInt(parts[2], 10);
 
   try {
-    const userResult = await dbClient.query('SELECT api_keys, walletid_btc, walletid_usd FROM users WHERE telegram_id = $1', [userId]);
+    const userResult = await dbClient.query('SELECT token, walletid_btc, walletid_usd FROM users WHERE telegramId = $1', [userId]);
 
     if (userResult.rows.length === 0) {
       ctx.reply("Blink API Key doesn't exist. Please add one. Check /help.");
@@ -174,7 +151,7 @@ bot.command('pay', async (ctx) => {
   const invoiceUID = ctx.message.text.split(' ')[1];
 
   try {
-    const userResult = await dbClient.query('SELECT * FROM users WHERE telegram_id = $1', [userId]);
+    const userResult = await dbClient.query('SELECT * FROM users WHERE telegramId = $1', [userId]);
 
     if (userResult.rows.length === 0) {
       ctx.reply("No API Key found. Please add your API key to generate invoices.");
@@ -300,7 +277,7 @@ bot.on('callback_query', async (ctx) => {
     switch (action) {
       case 'PAY':
         try {
-          const userResult = await dbClient.query('SELECT * FROM users WHERE telegram_id = $1', [userId]);
+          const userResult = await dbClient.query('SELECT * FROM users WHERE telegramId = $1', [userId]);
 
           if (userResult.rows.length === 0) {
             ctx.editMessageText("No API Key found. Please add your API key to generate invoices.", {
@@ -345,7 +322,7 @@ bot.on('callback_query', async (ctx) => {
 
       case 'BALANCE':
         try {
-          const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegram_id = $1', [userId]);
+          const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegramId = $1', [userId]);
 
           if (dbResult.rows.length > 0) {
             const blinkKey = dbResult.rows[0].api_keys;
@@ -387,7 +364,7 @@ bot.on('callback_query', async (ctx) => {
         const amount = parseInt(data.split('_')[2], 10);
 
         try {
-          const userResult = await dbClient.query('SELECT api_keys, walletid_btc, walletid_usd FROM users WHERE telegram_id = $1', [userId]);
+          const userResult = await dbClient.query('SELECT api_keys, walletid_btc, walletid_usd FROM users WHERE telegramId = $1', [userId]);
 
           if (userResult.rows.length === 0) {
             ctx.editMessageText("Blink API Key doesn't exist. Please add one.", {
@@ -433,6 +410,80 @@ bot.on('callback_query', async (ctx) => {
     }
   }
 });
+
+//--------------------------------------------------------------------------------------------------------------
+
+function isLessThanFiftyMinutes(createdTime) {
+  // Convert 'createdTime' to a JavaScript Date object in UTC
+  const createdDate = new Date(createdTime);
+
+  // Get current time in UTC by using `Date.now()` (returns milliseconds since the epoch in UTC)
+  const currentTime = Date.now();
+
+  // Calculate the time difference in milliseconds
+  const timeDifference = currentTime - createdDate.getTime();
+
+  // Convert 50 minutes to milliseconds (50 minutes * 60 seconds * 1000 ms)
+  const fiftyMinutesInMs = 50 * 60 * 1000;
+
+  // Return true if less than 50 minutes have passed, else false
+  return timeDifference < fiftyMinutesInMs;
+}
+
+
+async function fetchUserDataNew(token) {
+  const url = 'https://api.staging.blink.sv/graphql';
+  const headers = {
+    'Content-Type': 'application/json',
+    'Oauth2-Token': token
+  };
+  const body = JSON.stringify({
+    query: `query Me {
+        me {
+            defaultAccount {
+                wallets {
+                    id
+                    walletCurrency
+                    balance
+                }
+            }
+        }
+    }`,
+    variables: {}
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: body
+    });
+
+    const data = await response.json();
+    return data.data;
+  } catch (error) {
+    console.error('Error making the request:', error);
+    throw error;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//--------------------------------------------------------------------------------------------------------------
 
 async function fetchUserData(blinkKey) {
   const url = 'https://api.blink.sv/graphql';
