@@ -9,7 +9,6 @@ app.use(cors()); // Enable CORS for all routes
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const forward_url = process.env.forward_url;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const CALLBACK_URL = process.env.CALLBACK_URL;
@@ -30,24 +29,6 @@ app.all('*', async (req, res) => {
     // Call the getToken function with the extracted code and state
     const token = await getToken(authorizationCode, state)
     console.log("TOKEN:", token)
-    // try {
-    //   const response = await axios({
-    //     method: req.method,
-    //     url: forward_url,
-    //     data: token,
-    //     timeout: 10000, // 10 seconds timeout
-    //   });
-
-    //   // Forward the response status and data
-    //   res.status(response.status).send(response.data);
-    // } catch (error) {
-    //   console.error("Error forwarding request:", error.message);
-    //   if (error.response) {
-    //     res.status(error.response.status).send(error.response.data);
-    //   } else {
-    //     res.status(500).send(error.message);
-    //   }
-    // }
 
     res.send(`Code and state received. Authorization code: ${authorizationCode}, State: ${state}`);
   } else {
