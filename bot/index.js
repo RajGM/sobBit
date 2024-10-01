@@ -40,7 +40,7 @@ bot.command('addAPI', async (ctx) => {
     //const dbResult = await dbClient.query('SELECT api_keys FROM users WHERE telegram_id = $1', [userId]);
 
     const authorizationUrl = buildAuthorizationUrl(userId);
-
+    //check if last key generated was 55 minutes ago then ask to regenerate or proceed
     // const userData = await fetchUserData(apiKey);
     printObject("authorizationUrl:", authorizationUrl);
 

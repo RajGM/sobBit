@@ -13,24 +13,39 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const CALLBACK_URL = process.env.CALLBACK_URL;
 
+// PostgreSQL connection setup
+const { Client } = require('pg');
+
+const dbClient = new Client({
+  user: process.env.PGUSER || 'postgres',
+  host: process.env.PGHOST || 'localhost',  // Make sure 'PGHOST' is set to 'postgres'
+  database: process.env.PGDATABASE || 'postgres',
+  password: process.env.PGPASSWORD || 'mysecretpassword',
+  port: process.env.PGPORT || 5432,
+});
+
+dbClient.connect();
+
+
 // Middleware to log all incoming requests
 app.all('*', async (req, res) => {
   // Log request details
-  console.log(`Request Method: ${req.method}`);
-  console.log(`Request URL: ${req.url}`);
-  console.log(`Request Headers: ${JSON.stringify(req.headers)}`);
-  console.log(`Request Body: ${JSON.stringify(req.body)}`);
-
+  
   const authorizationCode = req.query.code;
   const state = req.query.state;
 
   // Check if code and state exist in the query
   if (authorizationCode && state) {
     // Call the getToken function with the extracted code and state
-    const token = await getToken(authorizationCode, state)
-    console.log("TOKEN:", token)
+    console.log("TOKEN:", token);
 
-    res.send(`Code and state received. Authorization code: ${authorizationCode}, State: ${state}`);
+    // Store the token in the database
+    await storeToken(state, token);
+
+    // Log token to the console (replace this with Telegram bot action later)
+    logTokenToConsole(state, token);
+
+    res.send(`Code and state received. Token Saved Authorization code: ${authorizationCode}, State: ${state}`);
   } else {
     // If code or state is missing, return an error
     res.status(400).send('Missing code or state in the request');
@@ -53,6 +68,7 @@ app.listen(port, () => {
   console.log(`Dummy server is running on http://localhost:${port}`);
 });
 
+// Function to fetch token from OAuth provider
 async function getToken(authorizationCode, state) {
   const url = 'https://oauth.staging.blink.sv/oauth2/token';
 
@@ -81,8 +97,31 @@ async function getToken(authorizationCode, state) {
     }
 
     const data = await response.json();
-    console.log('Access Token:', data);
+    console.log('Access Token:', data.access_token);
+
+    return data.access_token;  // Return the access token
   } catch (error) {
     console.error('Error:', error.message);
+    throw error;
   }
+}
+
+// Function to store token in the database
+async function storeToken(telegramId, token) {
+  try {
+    const query = `INSERT INTO users (telegramId, token, created) 
+                   VALUES ($1, $2, NOW()) 
+                   ON CONFLICT (telegramId) DO UPDATE 
+                   SET token = $2, created = NOW();`;
+
+    await dbClient.query(query, [telegramId, token]);
+    console.log(`Token for user ${telegramId} stored/updated successfully.`);
+  } catch (error) {
+    console.error('Error storing token in the database:', error.message);
+  }
+}
+
+// Dummy function to log token in the console
+function logTokenToConsole(telegramId, token) {
+  console.log(`Logging token for user ${telegramId}: ${token}`);
 }

@@ -12,7 +12,8 @@ const client = new Client({
 const createTableQuery = `
   CREATE TABLE IF NOT EXISTS users (
     telegramId VARCHAR(255) PRIMARY KEY,
-    token VARCHAR(255)
+    token VARCHAR(255),
+    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 `;
 
