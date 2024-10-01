@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  bot:
+    build: ./bot
+    container_name: telegram_bot
+    environment:
+      # Define connection settings for PostgreSQL
+      PGUSER: postgres
+      PGPASSWORD: mysecretpassword
+      PGDATABASE: postgres
+      PGHOST: postgres # Use the 'postgres' service name for Docker Compose network
+      PGPORT: 5432
+    depends_on:
+      - postgres
+    ports:
+      - "3001:3001"
+    restart: always
+
+  server:
+    build: ./server
+    container_name: node_server
+    environment:
+      # Define connection settings for PostgreSQL
+      PGUSER: postgres
+      PGPASSWORD: mysecretpassword
+      PGDATABASE: postgres
+      PGHOST: postgres # Use the 'postgres' service name for Docker Compose network
+      PGPORT: 5432
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    restart: always
+
+volumes:
+  postgres_data:
+    driver: local

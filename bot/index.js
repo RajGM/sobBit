@@ -18,11 +18,11 @@ const initialMessage = "Welcome! This bot can send and receive sats via Blink. H
 
 // PostgreSQL connection setup
 const dbClient = new Client({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'postgres',
-  password: 'mysecretpassword',
-  port: 5432,
+  user: process.env.PGUSER || 'postgres',
+  host: process.env.PGHOST || 'localhost',  // Make sure 'PGHOST' is set to 'postgres'
+  database: process.env.PGDATABASE || 'postgres',
+  password: process.env.PGPASSWORD || 'mysecretpassword',
+  port: process.env.PGPORT || 5432,
 });
 
 dbClient.connect();
