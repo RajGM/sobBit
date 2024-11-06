@@ -6,12 +6,14 @@ WORKDIR /usr/src/app
 
 # Copy package.json and package-lock.json
 COPY package*.json ./
+#COPY .npm-cache /root/.npm
 
 # Install dependencies
 RUN npm install
 
 # Copy the rest of the server source code
 COPY . .
+#COPY .npm-cache /root/.npm
 
 # Expose the port the server is running on
 EXPOSE 3000

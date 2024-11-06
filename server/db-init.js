@@ -10,11 +10,14 @@ const client = new Client({
 });
 
 const createTableQuery = `
-  CREATE TABLE IF NOT EXISTS users (
-    telegramId VARCHAR(255) PRIMARY KEY,
-    token VARCHAR(255),
-    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-  );
+  CREATE TABLE users (
+  telegramId BIGINT PRIMARY KEY,     -- Unique Telegram user ID
+  api_keys VARCHAR(255),             -- API key for accessing Blink services
+  walletid_btc VARCHAR(255),         -- Wallet ID for BTC wallet
+  walletid_usd VARCHAR(255),         -- Wallet ID for USD wallet
+  token VARCHAR(255),                -- Oauth2 token
+  created TIMESTAMP DEFAULT NOW()    -- Time when the record was created
+);
 `;
 
 const alterTableQuery = `

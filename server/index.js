@@ -29,7 +29,9 @@ dbClient.connect();
 // Middleware to log all incoming requests
 app.all('*', async (req, res) => {
   // Log request details
-  
+
+  console.log("INSIDE")
+
   const authorizationCode = req.query.code;
   const state = req.query.state;
 
@@ -67,6 +69,8 @@ app.listen(port, () => {
 
 // Function to fetch token from OAuth provider
 async function getToken(authorizationCode, state) {
+  //return 'ory_at_QX51bsbZ4OJJ4vKfXQLWuiOZZkStmbe884wo3t4O2Y0.1qbswSNZBkLK79flu4xeg7O3NtwugwkyldFp5nbIlFg';
+
   const url = 'https://oauth.staging.blink.sv/oauth2/token';
 
   // Create the basic auth header value
@@ -104,15 +108,17 @@ async function getToken(authorizationCode, state) {
 }
 
 // Function to store token in the database
-async function storeToken(telegramId, token) {
+async function storeToken(telegramid, token) {
   try {
-    const query = `INSERT INTO users (telegramId, token, created) 
-                   VALUES ($1, $2, NOW()) 
-                   ON CONFLICT (telegramId) DO UPDATE 
-                   SET token = $2, created = NOW();`;
+    const query = `
+  INSERT INTO users (telegramid, token, created) 
+  VALUES ($1, $2, NOW()) 
+  ON CONFLICT (telegramid) 
+  DO UPDATE SET token = $2, created = NOW();
+`;
 
-    await dbClient.query(query, [telegramId, token]);
-    console.log(`Token for user ${telegramId} stored/updated successfully.`);
+    await dbClient.query(query, [telegramid, token]);
+    console.log(`Token for user ${telegramid} stored/updated successfully.`);
   } catch (error) {
     console.error('Error storing token in the database:', error.message);
   }

@@ -6,6 +6,7 @@ WORKDIR /usr/src/app
 
 # Copy package.json and package-lock.json
 COPY package*.json ./
+#COPY .npm-cache /root/.npm
 
 # Install dependencies
 RUN npm install
