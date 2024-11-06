@@ -47,7 +47,6 @@ bot.command('addAPI', async (ctx) => {
 
 //error code and reply
 bot.command('balance', async (ctx) => {
-  console.log("INSIDEBALANCE:", ctx.from.id);
   const userId = ctx.from.id;
 
   try {
@@ -156,9 +155,9 @@ bot.command('pay', async (ctx) => {
   const userId = ctx.from.id;
   const paymentRequest = ctx.message.text.split(' ')[1];
 
-  console.log(userId, invoiceUID)
+  console.log(userId, paymentRequest)
 
-  ctx.reply('Payment successful for invoice: ' + invoiceUID);
+  //ctx.reply('Payment successful for invoice: ' + paymentRequest);
 
   try {
     const userResult = await dbClient.query('SELECT * FROM users WHERE telegramid = $1', [userId]);
@@ -168,8 +167,9 @@ bot.command('pay', async (ctx) => {
       return;
     }
 
-    const apiKey = userResult.rows[0].api_keys;
-    await sendInvoicePayment(apiKey, paymentRequest, walletId);
+    // try with each if one is success then do
+    const apiKey = userResult.rows[0].token;
+    await sendInvoicePaymentNew(apiKey, paymentRequest, walletId);
     ctx.reply('Payment successful for invoice: ' + invoiceUID);
   } catch (error) {
     console.error('Error during the payment process', error);
@@ -301,10 +301,8 @@ async function createInvoiceOnBehalfOfRecipientNew(token, currency, recipientWal
   }
 }
 
-//--------------------------------------------------------------------------------------------------------------
-
-async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
-  const url = 'https://api.blink.sv/graphql';
+async function sendInvoicePaymentNew(apiKey, paymentRequest, walletId) {
+  const url = 'https://api.staging.blink.sv/graphql';
   const headers = {
     'Content-Type': 'application/json',
     'X-API-KEY': apiKey
@@ -352,5 +350,7 @@ async function sendInvoicePayment(apiKey, paymentRequest, walletId) {
     console.error('Error sending payment:', error);
   }
 }
+
+//--------------------------------------------------------------------------------------------------------------
 
 bot.launch();

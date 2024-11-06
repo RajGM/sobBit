@@ -11,7 +11,7 @@ const client = new Client({
 
 const createTableQuery = `
   CREATE TABLE users (
-  telegramId BIGINT PRIMARY KEY,     -- Unique Telegram user ID
+  telegramid BIGINT PRIMARY KEY,     -- Unique Telegram user ID
   api_keys VARCHAR(255),             -- API key for accessing Blink services
   walletid_btc VARCHAR(255),         -- Wallet ID for BTC wallet
   walletid_usd VARCHAR(255),         -- Wallet ID for USD wallet
@@ -26,15 +26,17 @@ const alterTableQuery = `
 `;
 
 const insertUserQuery = `
-  INSERT INTO users (telegramId, token, created)
-  VALUES ($1, $2, NOW())
-  ON CONFLICT (telegramId) 
+  INSERT INTO users (telegramId, token, walletid_btc, walletid_usd, created) 
+  VALUES ($1, $2, $3,$4, NOW())
+  ON CONFLICT (telegramid) 
   DO UPDATE SET token = EXCLUDED.token, created = NOW();
 `;
 
 const user = {
   telegramId: '5623914798',
-  token: 'ory_at_drpjdX0HRzqq5YgsxDuxuFgZG_2G5OE6iE2xHDQhXck.pb0Xrhnt1z-dgMsvdwO94CNVdy2wsk82eDRk23i63zo'
+  token: 'ory_at_drpjdX0HRzqq5YgsxDuxuFgZG_2G5OE6iE2xHDQhXck.pb0Xrhnt1z-dgMsvdwO94CNVdy2wsk82eDRk23i63zo',
+  walletid_btc:'91d3091d-3933-4040-a03b-a2c037c4e305',
+  walletid_usd:'583f1986-1c02-4c56-9093-ed87b132a9a4'
 };
 
 async function initializeDB() {
@@ -51,7 +53,7 @@ async function initializeDB() {
     console.log('Column "created" ensured in "users" table');
 
     // Insert the user with token and update on conflict (also updating "created" timestamp)
-    await client.query(insertUserQuery, [user.telegramId, user.token]);
+    await client.query(insertUserQuery, [user.telegramId, user.token, user.walletid_btc, user.walletid_usd]);
     console.log(`User ${user.telegramId} added/exists in the database`);
 
     // Retrieve and log all users

@@ -42,6 +42,29 @@ app.all('*', async (req, res) => {
     const token = await getToken(authorizationCode, state);
 
     logTokenToConsole(state, token);
+
+    //GET THE TOKEN WALLETID FOR BTC USD AND STORE THOSE AS WELL
+
+    const userData = await fetchUserDataNew(token);
+      let balanceArray = {};
+
+      for (const wallet of userData.me.defaultAccount.wallets) {
+        if (wallet.walletCurrency === 'BTC') {
+          balanceArray.BTC = wallet.balance;
+        } else if (wallet.walletCurrency === 'USD') {
+          balanceArray.USD = wallet.balance;
+        }
+      }
+
+      let message = "Your balances:\n";
+      if (balanceArray.BTC !== undefined) {
+        message += `BTC Wallet: ${balanceArray.BTC} sats\n`;
+      }
+      if (balanceArray.USD !== undefined) {
+        message += `USD Wallet: ${balanceArray.USD} cents\n`;
+      }
+
+
     storeToken(state, token);
 
     // Log token to the console (replace this with Telegram bot action later)
@@ -127,4 +150,42 @@ async function storeToken(telegramid, token) {
 // Dummy function to log token in the console
 function logTokenToConsole(telegramId, token) {
   console.log(`Logging token for user ${telegramId}: ${token}`);
+}
+
+
+async function fetchUserDataNew(token) {
+  const url = 'https://api.staging.blink.sv/graphql';
+  const headers = {
+    'Content-Type': 'application/json',
+    'Oauth2-Token': token
+  };
+  const body = JSON.stringify({
+    query: `query Me {
+        me {
+            defaultAccount {
+                wallets {
+                    id
+                    walletCurrency
+                    balance
+                }
+            }
+        }
+    }`,
+    variables: {}
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: body
+    });
+
+    const data = await response.json();
+    console.log("BLANCE DATA:", data)
+    return data.data;
+  } catch (error) {
+    console.error('Error making the request:', error);
+    throw error;
+  }
 }
