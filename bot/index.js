@@ -1,8 +1,8 @@
 require('dotenv').config()
+const QRCode = require('qrcode');
 
 const { Telegraf } = require('telegraf');
 const { Client } = require('pg');
-const { v4: uuidv4 } = require('uuid');
 
 const botKey = process.env.BOTKEY;
 const bot = new Telegraf(botKey);
@@ -11,8 +11,8 @@ const initialMessage = "Welcome! This bot can send and receive sats via Blink. H
   "/start or /help - Show all available commands \n\n" +
   "/addAPI apiKey - Add or replace existing Blink APIKey \n" +
   "/balance - Shows the balances in your Blink wallet\n" +
-  "/createInvoice walletType amount - Creates an invoice \n" +
-  "/pay uuid - Pay the invoice using the invoiceID";
+  "/createInvoice walletType(BTC or USD) amount - Creates an invoice \n" +
+  "/pay walletType(BTC or USD) uuid - Pay the invoice using the invoiceID";
 
 // PostgreSQL connection setup
 const dbClient = new Client({
@@ -32,7 +32,6 @@ const buildAuthorizationUrl = require('./utils');
 
 bot.command('addAPI', async (ctx) => {
   const userId = ctx.from.id;
-  //const apiKey = ctx.message.text.split(' ')[1];
 
   try {
     const authorizationUrl = buildAuthorizationUrl(userId);
@@ -56,8 +55,6 @@ bot.command('balance', async (ctx) => {
     console.log('DB Result:', dbResult.rows);
 
     if (dbResult.rows.length > 0) {
-      const createdTime = dbResult.rows[0].created;
-      console.log('Created Time:', createdTime);
 
       const token = dbResult.rows[0].token;
 
@@ -88,11 +85,11 @@ bot.command('balance', async (ctx) => {
       ctx.reply(message);
 
     } else {
-      console.log("No rows found for user in the database.");
+      //console.log("No rows found for user in the database.");
       ctx.reply("Token key not found or expired. Please use /addAPI command to generate your Token key.");
     }
   } catch (error) {
-    console.error('Failed to retrieve balance:', error);
+    //console.error('Failed to retrieve balance:', error);
     ctx.reply("Failed to retrieve balance token expired. Please try again after regenerating key.");
   }
 });
@@ -103,20 +100,26 @@ bot.command('createInvoice', async (ctx) => {
   const walletType = parts[1].toUpperCase();
   const amount = parseInt(parts[2], 10);
 
-  console.log(userId, walletType, amount)
-
   try {
-    const userResult = await dbClient.query('SELECT token, walletid_btc, walletid_usd FROM users WHERE telegramid = $1', [userId]);
+    const userResult = await dbClient.query('SELECT token FROM users WHERE telegramid = $1', [userId]);
 
     if (userResult.rows.length === 0) {
       ctx.reply("Blink API Key doesn't exist. Please add one. Check /help.");
       return;
     }
 
-    const walletId = walletType === 'BTC' ? userResult.rows[0].walletid_btc : userResult.rows[0].walletid_usd;
     const apiKey = userResult.rows[0].token;
 
-    console.log("WALLET ID token", walletId, apiKey)
+    const userData = await fetchUserDataNew(apiKey);
+    let walletId = {};
+
+    for (const wallet of userData.me.defaultAccount.wallets) {
+      if (wallet.walletCurrency === 'BTC' && walletType.toUpperCase() === 'BTC') {
+        walletId = wallet.id;
+      } else if (wallet.walletCurrency === 'USD' && walletType.toUpperCase() === 'USD') {
+        walletId = wallet.id;
+      }
+    }
 
     const invoiceResponse = await createInvoiceOnBehalfOfRecipientNew(apiKey, walletType, walletId, amount);
 
@@ -124,8 +127,6 @@ bot.command('createInvoice', async (ctx) => {
       ctx.reply("Failed to create invoice. Please try again.");
       return;
     }
-
-    console.log("INVOICE GENERATED", invoiceResponse)
 
     let paymentRequest = null;
     if (invoiceResponse.lnInvoiceCreateOnBehalfOfRecipient) {
@@ -142,22 +143,30 @@ bot.command('createInvoice', async (ctx) => {
 
     const currencyType = walletType == "BTC" ? "Sats" : "Cents";
     const detailsMessage = `*Pay the invoice for amount:* ${amount} ${currencyType}\n Generated for ${walletType}  \n*Use this code for payment:* \`${paymentRequest}\``;
-    ctx.replyWithMarkdown(detailsMessage);
+
+    // Generate the QR code for the payment request
+    QRCode.toDataURL(paymentRequest, async (err, qrCodeData) => {
+      if (err) {
+        console.error('Error generating QR code:', err);
+        ctx.reply("Failed to generate QR code. Please use the payment request code.");
+        return;
+      }
+
+      // Send the QR code along with the invoice details
+      await ctx.replyWithMarkdown(detailsMessage);
+      await ctx.replyWithPhoto({ source: Buffer.from(qrCodeData.split(',')[1], 'base64') });
+    });
+
   } catch (error) {
     console.error('Error during invoice creation process', error);
     ctx.reply("Error accessing your data. Please try again later.");
   }
 });
 
-//pay is remaning only - rest are done 
-//complete and message and submit final evaluation form
 bot.command('pay', async (ctx) => {
   const userId = ctx.from.id;
-  const paymentRequest = ctx.message.text.split(' ')[1];
-
-  console.log(userId, paymentRequest)
-
-  //ctx.reply('Payment successful for invoice: ' + paymentRequest);
+  const walletType = ctx.message.text.split(' ')[1];
+  const paymentRequest = ctx.message.text.split(' ')[2];
 
   try {
     const userResult = await dbClient.query('SELECT * FROM users WHERE telegramid = $1', [userId]);
@@ -169,11 +178,12 @@ bot.command('pay', async (ctx) => {
 
     // try with each if one is success then do
     const apiKey = userResult.rows[0].token;
-    await sendInvoicePaymentNew(apiKey, paymentRequest, walletId);
-    ctx.reply('Payment successful for invoice: ' + invoiceUID);
+    await sendInvoicePaymentNew(apiKey, walletType, paymentRequest);
+    ctx.reply('Payment successful for invoice');
   } catch (error) {
-    console.error('Error during the payment process', error);
-    ctx.reply("Error processing your payment. Please try again later.");
+    //console.error('Error during the payment process', error);
+    console.log("ERROR", error)
+    ctx.reply("Error processing your payment - Error:" + error);
   }
 });
 
@@ -301,11 +311,26 @@ async function createInvoiceOnBehalfOfRecipientNew(token, currency, recipientWal
   }
 }
 
-async function sendInvoicePaymentNew(apiKey, paymentRequest, walletId) {
+async function sendInvoicePaymentNew(apiKey, walletType, paymentRequest) {
+
+  const userData = await fetchUserDataNew(apiKey);
+  let walletId = {};
+
+  for (const wallet of userData.me.defaultAccount.wallets) {
+    if (wallet.walletCurrency === 'BTC' && walletType.toUpperCase() === 'BTC') {
+      console.log("WALLET ID", wallet.id)
+      walletId = wallet.id;
+    } else if (wallet.walletCurrency === 'USD' && walletType.toUpperCase() === 'USD') {
+      console.log("WALLET ID", wallet.id)
+      walletId = wallet.id;
+    }
+  }
+
+
   const url = 'https://api.staging.blink.sv/graphql';
   const headers = {
     'Content-Type': 'application/json',
-    'X-API-KEY': apiKey
+    'Oauth2-Token': apiKey
   };
 
   const query = `
@@ -345,12 +370,14 @@ async function sendInvoicePaymentNew(apiKey, paymentRequest, walletId) {
       throw new Error(`HTTP error, status = ${response.status}, message = ${JSON.stringify(responseData)}`);
     }
 
-    console.log('Payment Status:', responseData.data.lnInvoicePaymentSend);
+    //console.log('Payment Status:', responseData.data.lnInvoicePaymentSend);
+    if (responseData.data.lnInvoicePaymentSend.status === 'FAILURE') {
+      throw new Error(`Payment failed: ${responseData.data.lnInvoicePaymentSend.errors.map(err => err.message).join(', ')}`);
+    }
   } catch (error) {
-    console.error('Error sending payment:', error);
+    throw error;
   }
 }
 
 //--------------------------------------------------------------------------------------------------------------
-
 bot.launch();
