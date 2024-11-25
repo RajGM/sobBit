@@ -28,10 +28,7 @@ dbClient.connect();
 
 // Middleware to log all incoming requests
 app.all('*', async (req, res) => {
-  // Log request details
-
-  console.log("INSIDE")
-
+ 
   const authorizationCode = req.query.code;
   const state = req.query.state;
 
@@ -41,29 +38,9 @@ app.all('*', async (req, res) => {
 
     const token = await getToken(authorizationCode, state);
 
-    logTokenToConsole(state, token);
+    //logTokenToConsole(state, token);
 
     //GET THE TOKEN WALLETID FOR BTC USD AND STORE THOSE AS WELL
-
-    const userData = await fetchUserDataNew(token);
-      let balanceArray = {};
-
-      for (const wallet of userData.me.defaultAccount.wallets) {
-        if (wallet.walletCurrency === 'BTC') {
-          balanceArray.BTC = wallet.balance;
-        } else if (wallet.walletCurrency === 'USD') {
-          balanceArray.USD = wallet.balance;
-        }
-      }
-
-      let message = "Your balances:\n";
-      if (balanceArray.BTC !== undefined) {
-        message += `BTC Wallet: ${balanceArray.BTC} sats\n`;
-      }
-      if (balanceArray.USD !== undefined) {
-        message += `USD Wallet: ${balanceArray.USD} cents\n`;
-      }
-
 
     storeToken(state, token);
 
@@ -92,7 +69,6 @@ app.listen(port, () => {
 
 // Function to fetch token from OAuth provider
 async function getToken(authorizationCode, state) {
-  //return 'ory_at_QX51bsbZ4OJJ4vKfXQLWuiOZZkStmbe884wo3t4O2Y0.1qbswSNZBkLK79flu4xeg7O3NtwugwkyldFp5nbIlFg';
 
   const url = 'https://oauth.staging.blink.sv/oauth2/token';
 
@@ -147,12 +123,7 @@ async function storeToken(telegramid, token) {
   }
 }
 
-// Dummy function to log token in the console
-function logTokenToConsole(telegramId, token) {
-  console.log(`Logging token for user ${telegramId}: ${token}`);
-}
-
-
+//make this return the wallet IDs
 async function fetchUserDataNew(token) {
   const url = 'https://api.staging.blink.sv/graphql';
   const headers = {

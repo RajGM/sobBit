@@ -9,10 +9,10 @@ const bot = new Telegraf(botKey);
 
 const initialMessage = "Welcome! This bot can send and receive sats via Blink. Here are the available commands:\n\n" +
   "/start or /help - Show all available commands \n\n" +
-  "/addAPI apiKey - Add or replace existing Blink APIKey \n" +
+  "/addAPI - Add or replace existing Blink APIKey via Oauth2 flow \n" +
   "/balance - Shows the balances in your Blink wallet\n" +
-  "/createInvoice walletType(BTC or USD) amount - Creates an invoice \n" +
-  "/pay walletType(BTC or USD) uuid - Pay the invoice using the invoiceID";
+  "/invoice walletType(BTC or USD) amount - Creates an invoice \n" +
+  "/pay walletType(BTC or USD) paymentRequest - Pay the invoice using the paymentRequest";
 
 // PostgreSQL connection setup
 const dbClient = new Client({
@@ -57,6 +57,8 @@ bot.command('balance', async (ctx) => {
     if (dbResult.rows.length > 0) {
 
       const token = dbResult.rows[0].token;
+      //check timeStamp if greater than 55 minutes then do unAuth Generation -- https://api.staging.galoy.io:443/graphql
+      //else do the auth Generation --'https://api.staging.galoy.io:443/graphql'
 
       if (!token) {
         ctx.reply("Token is missing. Please use /addAPI to generate your Token key.");
@@ -94,11 +96,21 @@ bot.command('balance', async (ctx) => {
   }
 });
 
-bot.command('createInvoice', async (ctx) => {
+bot.command('invoice', async (ctx) => {
   const userId = ctx.from.id;
   const parts = ctx.message.text.split(' ');
   const walletType = parts[1].toUpperCase();
   const amount = parseInt(parts[2], 10);
+
+  if(walletType.toUpperCase() !== 'BTC' && walletType.toUpperCase() !== 'USD') {
+    ctx.reply("Invalid wallet type. Please use BTC or USD.");
+    return;
+  }
+
+  if(isNaN(amount) || amount <= 0) {
+    ctx.reply("Invalid amount. Please enter a valid amount.");
+    return;
+  }
 
   try {
     const userResult = await dbClient.query('SELECT token FROM users WHERE telegramid = $1', [userId]);
@@ -167,6 +179,16 @@ bot.command('pay', async (ctx) => {
   const userId = ctx.from.id;
   const walletType = ctx.message.text.split(' ')[1];
   const paymentRequest = ctx.message.text.split(' ')[2];
+
+  if(walletType.toUpperCase() !== 'BTC' && walletType.toUpperCase() !== 'USD') {
+    ctx.reply("Invalid wallet type. Please use BTC or USD.");
+    return;
+  }
+
+  if(!paymentRequest || paymentRequest.length === 0) {
+    ctx.reply("Invalid payment request. Please enter a valid payment request.");
+    return;
+  }
 
   try {
     const userResult = await dbClient.query('SELECT * FROM users WHERE telegramid = $1', [userId]);
@@ -375,6 +397,90 @@ async function sendInvoicePaymentNew(apiKey, walletType, paymentRequest) {
       throw new Error(`Payment failed: ${responseData.data.lnInvoicePaymentSend.errors.map(err => err.message).join(', ')}`);
     }
   } catch (error) {
+    throw error;
+  }
+}
+
+async function createInvoiceOnBehalfOfRecipientNewWithOutToken(currency, recipientWalletId, amount) {
+  const url = 'https://api.staging.galoy.io:443/graphql';
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+
+  const queryBTC = `
+      mutation LnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+          lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
+              invoice {
+                  paymentRequest
+                  paymentHash
+                  paymentSecret
+                  satoshis
+              }
+              errors {
+                  message
+              }
+          }
+      }
+  `;
+
+  const queryUSD = `
+      mutation LnUsdInvoiceCreateOnBehalfOfRecipient($input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!) {
+          lnUsdInvoiceCreateOnBehalfOfRecipient(input: $input) {
+              invoice {
+                  paymentRequest
+                  paymentHash
+                  paymentSecret
+                  satoshis
+              }
+              errors {
+                  message
+              }
+          }
+      }
+  `;
+
+  const query = currency === 'BTC' ? queryBTC : queryUSD;
+
+  const variables = {
+    input: {
+      amount: amount,
+      recipientWalletId: recipientWalletId
+    }
+  };
+
+  const graphqlData = {
+    query: query,
+    variables: variables
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(graphqlData)
+    });
+
+    const responseData = await response.json();
+    if (!response.ok) {
+      throw new Error(`HTTP error, status = ${response.status}, details = ${JSON.stringify(responseData)}`);
+    }
+
+    if (responseData.errors && responseData.errors.length > 0) {
+      throw new Error(`GraphQL error: ${responseData.errors.map(err => err.message).join(', ')}`);
+    }
+
+    if (responseData.data && responseData.data.lnInvoiceCreateOnBehalfOfRecipient && responseData.data.lnInvoiceCreateOnBehalfOfRecipient.errors.length > 0) {
+      throw new Error(`Invoice creation error: ${responseData.data.lnInvoiceCreateOnBehalfOfRecipient.errors.map(err => err.message).join(', ')}`);
+    }
+
+    if (responseData.data && responseData.data.LnUsdInvoiceCreateOnBehalfOfRecipient && responseData.data.LnUsdInvoiceCreateOnBehalfOfRecipient.errors.length > 0) {
+      throw new Error(`Invoice creation error: ${responseData.data.LnUsdInvoiceCreateOnBehalfOfRecipient.errors.map(err => err.message).join(', ')}`);
+    }
+
+    console.log('Invoice Creation Result:', responseData.data);
+    return responseData.data;
+  } catch (error) {
+    console.error('Error creating invoice:', error.message);
     throw error;
   }
 }
