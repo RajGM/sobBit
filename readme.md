@@ -19,7 +19,7 @@ Displays the balances in your Blink wallet.
 
 ---
 
-### `/createInvoice <walletType> <amount>`
+### `/invoice <walletType> <amount>`
 Creates an invoice in your Blink wallet.
 
 - **Parameters**:
