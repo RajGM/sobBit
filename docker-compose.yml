@@ -13,11 +13,10 @@ services:
     restart: always
 
   db_init:
-    image: node:22
+    build:
+      context: .
+      dockerfile: Dockerfile.db_initializer
     container_name: db_initializer
-    working_dir: /app
-    volumes:
-      - .:/app
     environment:
       PGUSER: postgres
       PGPASSWORD: mysecretpassword
@@ -26,7 +25,6 @@ services:
       PGPORT: 5432
     depends_on:
       - postgres
-    command: ["node", "db-init.js"]
     restart: "no"
 
   bot:

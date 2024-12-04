@@ -1,0 +1,13 @@
+{
+    "name": "db_initializer",
+    "version": "1.0.0",
+    "description": "Database initialization script",
+    "main": "initializeDB.js",
+    "scripts": {
+      "start": "node initializeDB.js"
+    },
+    "dependencies": {
+      "pg": "^8.8.0"
+    }
+  }
+  
