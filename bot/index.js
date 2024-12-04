@@ -234,22 +234,22 @@ async function fetchUserDataNew(token) {
     });
 
     const data = await response.json();
-    const walletData = data.data;
+    // const walletData = data.data;
 
-    let walletId = {};
+    // let walletId = {};
 
-    for (const wallet of walletData.me.defaultAccount.wallets) {
-      console.log(wallet)
-      if (wallet.walletCurrency === 'BTC') {
-        walletId.BTC = wallet.id;
-      } else if (wallet.walletCurrency === 'USD') {
-        walletId.USD = wallet.id;
-      }
-    }
+    // for (const wallet of walletData.me.defaultAccount.wallets) {
+    //   console.log(wallet)
+    //   if (wallet.walletCurrency === 'BTC') {
+    //     walletId.BTC = wallet.id;
+    //   } else if (wallet.walletCurrency === 'USD') {
+    //     walletId.USD = wallet.id;
+    //   }
+    // }
 
     //console.log("BALANCE DATA:", data)
-    //return data.data;  // this should be the ione that is returned
-    return walletId;
+    return data.data;  // this should be the ione that is returned
+    //return walletId;
   } catch (error) {
     console.error('Error making the request:', error);
     throw error;
