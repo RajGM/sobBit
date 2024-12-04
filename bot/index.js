@@ -115,15 +115,18 @@ bot.command('invoice', async (ctx) => {
       return;
     }
 
-    const apiKey = userResult.rows[0].token;
-    
-    const userData = await fetchUserDataNew(apiKey);
+    console.log(userResult.rows[0])
+    if (!userResult.rows[0].walletid_btc || !userResult.rows[0].walletid_usd) {
+      ctx.reply("Please add api key to generate invoice. Check /help.");
+      return;
+    }
+
     let invoiceResponse = null;
 
     if(walletType.toUpperCase() === 'BTC') {
-      invoiceResponse = await createInvoiceOnBehalfOfRecipientNewWithOutToken(walletType, userData.BTC, amount);
+      invoiceResponse = await createInvoiceOnBehalfOfRecipientNewWithOutToken(walletType, userResult.rows[0].walletid_btc, amount);
     }else if(walletType.toUpperCase() === 'USD') {
-      invoiceResponse = await createInvoiceOnBehalfOfRecipientNewWithOutToken(walletType, userData.USD, amount);
+      invoiceResponse = await createInvoiceOnBehalfOfRecipientNewWithOutToken(walletType, userResult.rows[0].walletid_usd, amount);
     }
 
     if (invoiceResponse == null) {
