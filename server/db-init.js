@@ -34,7 +34,7 @@ const insertUserQuery = `
 
 const user = {
   telegramId: '5623914798',
-  token: 'ory_at_c0JAPZ5P9Tt7w2Jg3hiUg5PnTGvmhX3O2n1TqBArEI4.42kBwvodhracLQbwx8Qu1k0ZNV78VmDelzRWzcCcB48',
+  token: 'ory_at_guX4vvX7jQf5Fuyjv5L_bvD5XJFk3qdzFQlgsDgxhU4.vSaGhaXA4AN7wBPYMGilDeTF79vsSoEvDCWuEB6wV7U',
   walletid_btc:'91d3091d-3933-4040-a03b-a2c037c4e305',
   walletid_usd:'583f1986-1c02-4c56-9093-ed87b132a9a4'
 };

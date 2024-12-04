@@ -28,7 +28,7 @@ dbClient.connect();
 
 // Middleware to log all incoming requests
 app.all('*', async (req, res) => {
- 
+
   const authorizationCode = req.query.code;
   const state = req.query.state;
 
@@ -39,10 +39,9 @@ app.all('*', async (req, res) => {
     const token = await getToken(authorizationCode, state);
 
     //logTokenToConsole(state, token);
-
-    //GET THE TOKEN WALLETID FOR BTC USD AND STORE THOSE AS WELL
-
-    storeToken(state, token);
+    const walletData = await fetchUserDataNew(token);
+    
+    storeToken(state, token, walletData.BTC, walletData.USD);
 
     // Log token to the console (replace this with Telegram bot action later)
 
@@ -107,19 +106,23 @@ async function getToken(authorizationCode, state) {
 }
 
 // Function to store token in the database
-async function storeToken(telegramid, token) {
+async function storeToken(telegramid, token, walletid_btc, walletid_usd) {
   try {
     const query = `
-  INSERT INTO users (telegramid, token, created) 
-  VALUES ($1, $2, NOW()) 
-  ON CONFLICT (telegramid) 
-  DO UPDATE SET token = $2, created = NOW();
-`;
+      INSERT INTO users (telegramid, token, walletid_btc, walletid_usd, created) 
+      VALUES ($1, $2, $3, $4, NOW()) 
+      ON CONFLICT (telegramid) 
+      DO UPDATE SET 
+        token = EXCLUDED.token, 
+        walletid_btc = EXCLUDED.walletid_btc, 
+        walletid_usd = EXCLUDED.walletid_usd,
+        created = NOW();
+    `;
 
-    await dbClient.query(query, [telegramid, token]);
-    console.log(`Token for user ${telegramid} stored/updated successfully.`);
+    await dbClient.query(query, [telegramid, token, walletid_btc, walletid_usd]);
+    console.log(`Token and wallet IDs for user ${telegramid} stored/updated successfully.`);
   } catch (error) {
-    console.error('Error storing token in the database:', error.message);
+    console.error('Error storing token and wallet IDs in the database:', error.message);
   }
 }
 
@@ -153,8 +156,21 @@ async function fetchUserDataNew(token) {
     });
 
     const data = await response.json();
-    console.log("BLANCE DATA:", data)
-    return data.data;
+    const walletData = data.data;
+
+    let walletId = {};
+
+    for (const wallet of walletData.me.defaultAccount.wallets) {
+      console.log(wallet)
+      if (wallet.walletCurrency === 'BTC') {
+        walletId.BTC = wallet.id;
+      } else if (wallet.walletCurrency === 'USD') {
+        walletId.USD = wallet.id;
+      }
+    }
+
+    console.log("WALLET DATA:", walletId)
+    return walletId;
   } catch (error) {
     console.error('Error making the request:', error);
     throw error;

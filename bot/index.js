@@ -51,15 +51,10 @@ bot.command('balance', async (ctx) => {
   try {
     const dbResult = await dbClient.query('SELECT * FROM users WHERE telegramid = $1', [userId]);
 
-    // Log the dbResult for debugging
-    console.log('DB Result:', dbResult.rows);
-
     if (dbResult.rows.length > 0) {
 
       const token = dbResult.rows[0].token;
-      //check timeStamp if greater than 55 minutes then do unAuth Generation -- https://api.staging.galoy.io:443/graphql
-      //else do the auth Generation --'https://api.staging.galoy.io:443/graphql'
-
+     
       if (!token) {
         ctx.reply("Token is missing. Please use /addAPI to generate your Token key.");
         return;
@@ -83,7 +78,7 @@ bot.command('balance', async (ctx) => {
       if (balanceArray.USD !== undefined) {
         message += `USD Wallet: ${balanceArray.USD} cents\n`;
       }
-
+      console.log("BALANCE MESSAGE:", message)
       ctx.reply(message);
 
     } else {
@@ -113,7 +108,7 @@ bot.command('invoice', async (ctx) => {
   }
 
   try {
-    const userResult = await dbClient.query('SELECT token FROM users WHERE telegramid = $1', [userId]);
+    const userResult = await dbClient.query('SELECT * FROM users WHERE telegramid = $1', [userId]);
 
     if (userResult.rows.length === 0) {
       ctx.reply("Blink API Key doesn't exist. Please add one. Check /help.");
@@ -121,19 +116,15 @@ bot.command('invoice', async (ctx) => {
     }
 
     const apiKey = userResult.rows[0].token;
-
+    
     const userData = await fetchUserDataNew(apiKey);
-    let walletId = {};
+    let invoiceResponse = null;
 
-    for (const wallet of userData.me.defaultAccount.wallets) {
-      if (wallet.walletCurrency === 'BTC' && walletType.toUpperCase() === 'BTC') {
-        walletId = wallet.id;
-      } else if (wallet.walletCurrency === 'USD' && walletType.toUpperCase() === 'USD') {
-        walletId = wallet.id;
-      }
+    if(walletType.toUpperCase() === 'BTC') {
+      invoiceResponse = await createInvoiceOnBehalfOfRecipientNewWithOutToken(walletType, userData.BTC, amount);
+    }else if(walletType.toUpperCase() === 'USD') {
+      invoiceResponse = await createInvoiceOnBehalfOfRecipientNewWithOutToken(walletType, userData.USD, amount);
     }
-
-    const invoiceResponse = await createInvoiceOnBehalfOfRecipientNew(apiKey, walletType, walletId, amount);
 
     if (invoiceResponse == null) {
       ctx.reply("Failed to create invoice. Please try again.");
@@ -240,8 +231,22 @@ async function fetchUserDataNew(token) {
     });
 
     const data = await response.json();
-    console.log("BLANCE DATA:", data)
-    return data.data;
+    const walletData = data.data;
+
+    let walletId = {};
+
+    for (const wallet of walletData.me.defaultAccount.wallets) {
+      console.log(wallet)
+      if (wallet.walletCurrency === 'BTC') {
+        walletId.BTC = wallet.id;
+      } else if (wallet.walletCurrency === 'USD') {
+        walletId.USD = wallet.id;
+      }
+    }
+
+    //console.log("BALANCE DATA:", data)
+    //return data.data;  // this should be the ione that is returned
+    return walletId;
   } catch (error) {
     console.error('Error making the request:', error);
     throw error;
