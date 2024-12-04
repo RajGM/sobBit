@@ -19,4 +19,4 @@ COPY . .
 EXPOSE 3000
 
 # Run database initialization script, then start the application
-CMD ["sh", "-c", "node db-init.js && npm start"]
+CMD ["npm", "start"]
